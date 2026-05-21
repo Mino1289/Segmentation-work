@@ -1,7 +1,11 @@
 import torch
 from torch import nn
 
-from sam.util import LayerNorm2d
+import os
+
+os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from util import LayerNorm2d
 from vit.vit import ViT, ViTConfig
 
 

@@ -83,13 +83,13 @@ class ViT(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch_embed(x)
         x = x + self.pos_embed
-        
+
         B, H, W, C = x.shape
         x = x.view(B, H * W, C)
-    
+
         x = self.encoder(x)
         x = self.norm(x)
-        
+
         x = x.view(B, H, W, C)
         if self.cls_head:
             return self.head(x[:, 0])

@@ -3,7 +3,11 @@ import torch
 from torch import nn
 from typing import Optional, Tuple
 
-from sam.util import LayerNorm2d
+import os
+
+os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from util.util import LayerNorm2d
 
 
 class PositionEmbedding(nn.Module):

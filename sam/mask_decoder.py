@@ -156,9 +156,13 @@ class MaskDecoder(nn.Module):
         """
         bs = image_embeddings.shape[0]
 
-        output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0) # [4+1, 256]
-        output_tokens = output_tokens.unsqueeze(0).expand(bs, -1, -1) # [B, 4+1, 256]
-        tokens = torch.cat([output_tokens, sparse_prompt_embeddings], dim=1) # [B, 4+1+N, 256]
+        output_tokens = torch.cat(
+            [self.iou_token.weight, self.mask_tokens.weight], dim=0
+        )  # [4+1, 256]
+        output_tokens = output_tokens.unsqueeze(0).expand(bs, -1, -1)  # [B, 4+1, 256]
+        tokens = torch.cat(
+            [output_tokens, sparse_prompt_embeddings], dim=1
+        )  # [B, 4+1+N, 256]
 
         mask_pe = torch.zeros(
             (bs, self.num_mask_tokens, self.embed_dim), device=tokens.device
