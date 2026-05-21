@@ -69,6 +69,10 @@ class ViT(nn.Module):
                 for _ in range(config.layers)
             ]
         )
+        grid_size = img_size // config.patch_size  # 1024 // 16 = 64
+        self.pos_embed = nn.Parameter(
+            torch.zeros(1, grid_size, grid_size, config.hidden_size)
+        )
         self.norm = nn.LayerNorm(config.hidden_size)
         self.cls_head = cls_head
         if self.cls_head:
@@ -78,11 +82,18 @@ class ViT(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch_embed(x)
+        x = x + self.pos_embed
+        
+        B, H, W, C = x.shape
+        x = x.view(B, H * W, C)
+    
         x = self.encoder(x)
         x = self.norm(x)
+        
+        x = x.view(B, H, W, C)
         if self.cls_head:
             return self.head(x[:, 0])
-        return self.head(x[:, 1:, :])
+        return self.head(x)
 
 
 if __name__ == "__main__":

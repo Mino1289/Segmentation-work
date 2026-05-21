@@ -3,7 +3,13 @@ from torch import nn
 
 
 class TransformerEncoderBlock(nn.Module):
-    def __init__(self, emb_size:int=768, heads:int=12, dropout:float=0.1, mlp_ratio:int=4):
+    def __init__(
+        self,
+        emb_size: int = 768,
+        heads: int = 12,
+        dropout: float = 0.1,
+        mlp_ratio: int = 4,
+    ):
         super(TransformerEncoderBlock, self).__init__()
 
         self.norm1 = nn.LayerNorm(emb_size)
