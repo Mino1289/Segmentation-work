@@ -1,0 +1,3 @@
+[submodule "dataset/ADE20K"]
+	path = dataset/ADE20K
+	url = git@github.com:CSAILVision/ADE20K.git
