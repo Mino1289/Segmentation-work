@@ -3,3 +3,4 @@ ruff
 transformers==5.9.0
 torch==2.12.0
 torchvision
+timm
