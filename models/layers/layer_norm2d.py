@@ -2,17 +2,6 @@ import torch
 from torch import nn
 
 
-def get_device():
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    elif torch.xpu.is_available():
-        return torch.device("xpu")
-    elif torch.backends.mps.is_available():
-        return torch.device("mps")
-    else:
-        return torch.device("cpu")
-
-
 # Copy-pasted from official facebook implementation
 class LayerNorm2d(nn.Module):
     def __init__(self, num_channels: int, eps: float = 1e-6) -> None:

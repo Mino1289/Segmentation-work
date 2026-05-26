@@ -1,12 +1,8 @@
 import torch
 from torch import nn
 
-import os
-
-os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from util import LayerNorm2d
-from vit.vit import ViT, ViTConfig
+from .layer_norm2d import LayerNorm2d
+from .vit import ViT, ViTConfig
 
 
 class ImageEncoder(nn.Module):

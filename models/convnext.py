@@ -2,11 +2,11 @@ import torch
 from torch import nn
 from typing import Tuple
 
-import os
+from layers.layer_norm2d import LayerNorm2d
+from layers.downsampling_block import DownsamplingBlock
+from layers.convnext_block import ConvNeXtBlock
 
-os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from util import LayerNorm2d, get_device
+from util import get_device
 
 
 class ConvNeXtConfig:
@@ -73,71 +73,6 @@ class ConvNeXtConfig:
         self.expansion = config[name]["expansion"]
 
 
-class LayerScale(nn.Module):
-    def __init__(self, channels: int, init_value: float = 1e-6):
-        super().__init__()
-        self.gamma = nn.Parameter(init_value * torch.ones(channels))
-
-    def forward(self, x: torch.Tensor):
-        return self.gamma * x
-
-
-class StochasticDepth(nn.Module):
-    def __init__(self, drop_prob: float = 0.0):
-        super().__init__()
-        self.drop_prob = drop_prob
-
-    def forward(self, x: torch.Tensor):
-        if not self.training or self.drop_prob == 0.0:
-            return x
-        keep_prob = 1 - self.drop_prob
-        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
-        random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
-        random_tensor.floor_()
-        return x.div(keep_prob) * random_tensor
-
-
-class DownsamplingBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int):
-        super().__init__()
-        self.downsample = nn.Sequential(
-            LayerNorm2d(in_channels),
-            nn.Conv2d(in_channels, out_channels, kernel_size=2, stride=2),
-        )
-
-    def forward(self, x: torch.Tensor):
-        return self.downsample(x)
-
-
-class ConvNeXtBlock(nn.Module):
-    def __init__(self, channels: int, expansion_ratio: int = 4):
-        super().__init__()
-
-        self.channels = channels
-        self.expansion_ratio = expansion_ratio
-
-        self.conv_dw = nn.Conv2d(
-            channels, channels, kernel_size=7, padding=3, groups=channels
-        )
-        self.norm = nn.LayerNorm(channels, eps=1e-6)
-        self.fc1 = nn.Linear(channels, channels * expansion_ratio)
-        self.activation = nn.GELU()
-        self.fc2 = nn.Linear(channels * expansion_ratio, channels)
-        self.layer_scale = LayerScale(channels)
-
-    def forward(self, x: torch.Tensor):
-        residual = x
-        x = self.conv_dw(x)
-        x = x.permute(0, 2, 3, 1)  # (B, H, W, C)
-        x = self.norm(x)
-        x = self.fc1(x)
-        x = self.activation(x)
-        x = self.fc2(x)
-        x = self.layer_scale(x)
-        x = x.permute(0, 3, 1, 2)  # (B, C, H, W)
-        return residual + x
-
-
 class ConvNeXt(nn.Module):
     def __init__(
         self,
@@ -189,6 +124,9 @@ class ConvNeXt(nn.Module):
                 "classifier", nn.Linear(self.channels[-1], self.num_classes)
             )
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x)
+
     def load_from_timm(self, timm_model: nn.Module):
         state_dict_timm = timm_model.state_dict()
         state_dict_custom = self.state_dict()
@@ -235,9 +173,6 @@ class ConvNeXt(nn.Module):
 
         self.load_state_dict(new_state_dict, strict=False)
         return self
-
-    def forward(self, x: torch.Tensor):
-        return self.model(x)
 
 
 if __name__ == "__main__":

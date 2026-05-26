@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 
-from patch_embedding import PatchEmbedding
-from transformer_encoder_block import TransformerEncoderBlock
+from .patch_embedding import PatchEmbedding
+from .transformer_encoder_block import TransformerEncoderBlock
 
 
 class ViTConfig:
@@ -94,22 +94,3 @@ class ViT(nn.Module):
         if self.cls_head:
             return self.head(x[:, 0])
         return self.head(x)
-
-
-if __name__ == "__main__":
-    model_config = ViTConfig(name="huge")
-    model_config.patch_size = 16
-
-    model = ViT(
-        img_size=1024,
-        in_channels=3,
-        config=model_config,
-        cls_head=False,
-    )
-    model.to("xpu")
-
-    x = torch.randn(1, 3, 1024, 1024).to("xpu")
-    with torch.no_grad():
-        out = model(x)
-
-    print(out.shape)

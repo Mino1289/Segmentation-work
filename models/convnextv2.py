@@ -2,12 +2,11 @@ import torch
 from torch import nn
 from typing import Tuple
 
-import os
+from layers.convnextv2_block import ConvNeXtV2Block
+from layers.downsampling_block import DownsamplingBlock
+from layers.layer_norm2d import LayerNorm2d
 
-os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from convnext.convnext import DownsamplingBlock
-from util import LayerNorm2d, get_device
+from util import get_device
 
 
 class ConvNeXtV2Config:
@@ -67,51 +66,6 @@ class ConvNeXtV2Config:
         self.channels = config[name]["channels"]
         self.blocks = config[name]["blocks"]
         self.expansion = config[name]["expansion"]
-
-
-class GlobalResponseNormalization(nn.Module):
-    """Global Response Normalization (GRN) module as described in the ConvNeXtV2 paper."""
-
-    def __init__(self, channels: int, eps: float = 1e-6):
-        super().__init__()
-        self.gamma = nn.Parameter(torch.zeros(channels))
-        self.beta = nn.Parameter(torch.zeros(channels))
-        self.eps = eps
-
-    def forward(self, x: torch.Tensor):
-        """Applies GRN to the input tensor.
-        x shape is expected to be (B, H, W, C)."""
-        gx = torch.norm(x, p=2, dim=(1, 2), keepdim=True)
-        nx = gx / (gx.mean(dim=-1, keepdim=True) + self.eps)
-        return self.gamma * (x * nx) + self.beta + x
-
-
-class ConvNeXtV2Block(nn.Module):
-    def __init__(self, channels: int, expansion_ratio: int = 4):
-        super().__init__()
-
-        self.channels = channels
-        self.expansion_ratio = expansion_ratio
-
-        self.dwconv = nn.Conv2d(
-            channels, channels, kernel_size=7, padding=3, groups=channels
-        )
-        self.norm = nn.LayerNorm(channels, eps=1e-6)
-        self.pwconv1 = nn.Linear(channels, channels * expansion_ratio)
-        self.activation = nn.GELU()
-        self.grn = GlobalResponseNormalization(channels * expansion_ratio)
-        self.pwconv2 = nn.Linear(channels * expansion_ratio, channels)
-
-    def forward(self, x: torch.Tensor):
-        residual = x
-        x = self.dwconv(x)
-        x = x.permute(0, 2, 3, 1)  # (B, H, W, C)
-        x = self.norm(x)
-        x = self.pwconv1(x)
-        x = self.activation(x)
-        x = self.pwconv2(x)
-        x = x.permute(0, 3, 1, 2)  # (B, C, H, W)
-        return residual + x
 
 
 class ConvNeXtV2(nn.Module):
