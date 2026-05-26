@@ -73,6 +73,7 @@ class ConvNeXtV2(nn.Module):
         self,
         input_shape: Tuple[int, int, int] = (3, 224, 224),
         config: ConvNeXtV2Config = ConvNeXtV2Config(name="base"),
+        features_only: bool = False,
         cls_head: bool = True,
         num_classes: int = 1000,
     ):
@@ -82,45 +83,63 @@ class ConvNeXtV2(nn.Module):
         self.config = config
         self.cls_head = cls_head
         self.num_classes = num_classes
+        self.features_only = features_only
 
         self.blocks = self.config.blocks
         self.channels = self.config.channels
         self.expansion = self.config.expansion
 
-        self.model = nn.Sequential()
-
-        stem = nn.Sequential(
+        self.stem = nn.Sequential(
             nn.Conv2d(input_shape[0], self.channels[0], kernel_size=4, stride=4),
             LayerNorm2d(self.channels[0], eps=1e-6),
         )
-        self.model.add_module("stem", stem)
+
+        self.stages = nn.ModuleList()
 
         for stage_idx in range(len(self.channels)):
-            for block_idx in range(self.blocks[stage_idx]):
-                self.model.add_module(
-                    f"stage{stage_idx}_block{block_idx}",
-                    ConvNeXtV2Block(self.channels[stage_idx], self.expansion),
-                )
-            if stage_idx < len(self.channels) - 1:
-                self.model.add_module(
+            stage = nn.Sequential()
+
+            # Si ce n'est pas le premier stage, on commence par un downsample
+            if stage_idx > 0:
+                stage.add_module(
                     f"downsample{stage_idx}",
                     DownsamplingBlock(
-                        self.channels[stage_idx], self.channels[stage_idx + 1]
+                        self.channels[stage_idx - 1], self.channels[stage_idx]
                     ),
                 )
 
+            # On ajoute les blocs de ce stage
+            for block_idx in range(self.blocks[stage_idx]):
+                stage.add_module(
+                    f"block{block_idx}",
+                    ConvNeXtV2Block(self.channels[stage_idx], self.expansion),
+                )
+
+            self.stages.append(stage)
+
         if self.cls_head:
-            self.model.add_module("global_avg_pool", nn.AdaptiveAvgPool2d((1, 1)))
-            self.model.add_module("flatten", nn.Flatten(1))
-            self.model.add_module(
-                "layer_norm", nn.LayerNorm(self.channels[-1], eps=1e-6)
-            )
-            self.model.add_module(
-                "classifier", nn.Linear(self.channels[-1], self.num_classes)
+            self.head = nn.Sequential(
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(1),
+                nn.LayerNorm(self.channels[-1], eps=1e-6),
+                nn.Linear(self.channels[-1], self.num_classes),
             )
 
     def forward(self, x: torch.Tensor):
-        return self.model(x)
+        x = self.stem(x)
+
+        features = []
+        for stage in self.stages:
+            x = stage(x)
+            if self.features_only:
+                features.append(x)
+
+        if self.features_only:
+            return features
+
+        if self.cls_head:
+            x = self.head(x)
+        return x
 
     def load_from_timm(self, timm_model: nn.Module):
         state_dict_timm = timm_model.state_dict()
@@ -130,15 +149,13 @@ class ConvNeXtV2(nn.Module):
         for k_timm, v in state_dict_timm.items():
             k_custom = k_timm
 
-            if k_timm.startswith("stem."):
-                k_custom = f"model.{k_timm}"
-            elif k_timm.startswith("stages."):
+            if k_timm.startswith("stages."):
                 parts = k_timm.split(".")
                 stage_idx = int(parts[1])
 
                 if parts[2] == "blocks":
                     block_idx = int(parts[3])
-                    prefix = f"model.stage{stage_idx}_block{block_idx}"
+                    prefix = f"stages.{stage_idx}.block{block_idx}"
 
                     if "conv_dw" in k_timm:
                         k_custom = k_timm.replace(
@@ -164,17 +181,19 @@ class ConvNeXtV2(nn.Module):
                         k_custom = f"{prefix}.{suffix}"
 
                 elif parts[2] == "downsample":
-                    prefix = f"model.downsample{stage_idx - 1}"
-                    k_custom = k_timm.replace(f"stages.{stage_idx}.", f"{prefix}.")
+                    k_custom = k_timm.replace(
+                        f"stages.{stage_idx}.downsample",
+                        f"stages.{stage_idx}.downsample{stage_idx}.downsample",
+                    )
 
             elif k_timm == "head.norm.weight" or k_timm == "norm_pre.weight":
-                k_custom = "model.layer_norm.weight"
+                k_custom = "head.2.weight"
             elif k_timm == "head.norm.bias" or k_timm == "norm_pre.bias":
-                k_custom = "model.layer_norm.bias"
+                k_custom = "head.2.bias"
             elif k_timm == "head.fc.weight":
-                k_custom = "model.classifier.weight"
+                k_custom = "head.3.weight"
             elif k_timm == "head.fc.bias":
-                k_custom = "model.classifier.bias"
+                k_custom = "head.3.bias"
 
             if k_custom in state_dict_custom:
                 new_state_dict[k_custom] = v
