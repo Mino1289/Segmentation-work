@@ -41,7 +41,7 @@ class Backbone(nn.Module):
 
 class UPerNet(nn.Module):
     def __init__(self, backbone: nn.Module, channels: int, num_classes: int):
-        super(UPerNet, self).__init__()
+        super().__init__()
         self.backbone = backbone
         self.backbone_channels = self.backbone.config.channels
         self.channels = channels
