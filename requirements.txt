@@ -6,3 +6,6 @@ torchvision
 timm
 torchprofile
 matplotlib
+datasets
+scikit-learn
+opencv-python
