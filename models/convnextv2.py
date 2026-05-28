@@ -2,11 +2,11 @@ import torch
 from torch import nn
 from typing import Tuple
 
-from layers.convnextv2_block import ConvNeXtV2Block
-from layers.downsampling_block import DownsamplingBlock
-from layers.layer_norm2d import LayerNorm2d
+from .layers.convnextv2_block import ConvNeXtV2Block
+from .layers.downsampling_block import DownsamplingBlock
+from .layers.layer_norm2d import LayerNorm2d
 
-from util import get_device
+from .util import get_device
 
 
 class ConvNeXtV2Config:
@@ -81,9 +81,9 @@ class ConvNeXtV2(nn.Module):
 
         self.input_shape = input_shape
         self.config = config
+        self.features_only = features_only
         self.cls_head = cls_head
         self.num_classes = num_classes
-        self.features_only = features_only
 
         self.blocks = self.config.blocks
         self.channels = self.config.channels
@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     size = "base"  # Change to "atto", "femto", "pico", "nano", "tiny", "small", "base", "large", or "huge" as needed
 
-    timm_model = timm.create_model(f"convnextv2_{size}", pretrained=False)
+    timm_model = timm.create_model(f"convnextv2_{size}", pretrained=True)
     # Remove the classification head for feature extraction
     timm_model.head = nn.Identity()
     timm_model.to(device)

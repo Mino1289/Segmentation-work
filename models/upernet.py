@@ -1,11 +1,12 @@
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 import timm
 from typing import List
 
-from convnextv2 import ConvNeXtV2, ConvNeXtV2Config
-from layers.feature_pyramid_network import FeaturePyramidNetwork
-from layers.object_segmentation_head import ObjectSegmentationHead
+from .convnextv2 import ConvNeXtV2, ConvNeXtV2Config
+from .layers.feature_pyramid_network import FeaturePyramidNetwork
+from .layers.object_segmentation_head import ObjectSegmentationHead
 
 
 class Backbone(nn.Module):
@@ -55,9 +56,14 @@ class UPerNet(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        features = self.backbone(x)
-        fpn_features = self.fpn(features)
-        out = self.head(fpn_features)  # fpn_features est un tuple (P2, P3, P4, P5)
+        # features = self.backbone(x)
+        # fpn_features = self.fpn(features)
+        # out = self.head(fpn_features)  # fpn_features est un tuple (P2, P3, P4, P5)
+        features = checkpoint(self.backbone, x, use_reentrant=False)
+        def decode_step(*feats):
+            fpn_feats = self.fpn(feats)
+            return self.head(fpn_feats)
+        out = checkpoint(decode_step, *features, use_reentrant=False)
         return out
 
 
