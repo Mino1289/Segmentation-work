@@ -6,6 +6,8 @@ from torchvision.transforms import v2
 from tqdm import tqdm
 import numpy as np
 import os
+import csv
+import matplotlib.pyplot as plt
 from PIL import Image
 from datasets import load_dataset
 
@@ -17,11 +19,49 @@ from models.util import (
     compute_flops,
     unit,
     compute_pixel_accuracy,
-    compute_dice_score,
     compute_mIoU,
     compute_boundary_iou,
-    compute_mask_ap,
 )
+
+def plot_metrics(history, log_dir):
+    epochs = [h["epoch"] for h in history]
+    
+    # Plotting Loss
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, [h["train_loss"] for h in history], label="Train Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training Loss")
+    plt.legend()
+
+    # Plotting Accuracy
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, [h["train_acc"] for h in history], label="Train Acc")
+    val_epochs = [h["epoch"] for h in history if h["val_acc"] is not None]
+    if val_epochs:
+        plt.plot(val_epochs, [h["val_acc"] for h in history if h["val_acc"] is not None], label="Val Acc", marker='o')
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Accuracy")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(log_dir, "metrics_accuracy.png"))
+    plt.close()
+
+    # Plotting mIoU
+    if val_epochs:
+        plt.figure(figsize=(6, 5))
+        plt.plot(val_epochs, [h["val_mIoU"] for h in history if h["val_mIoU"] is not None], label="Val mIoU", marker='o', color='green')
+        plt.plot(val_epochs, [h["val_biou"] for h in history if h["val_biou"] is not None], label="Val Bnd IoU", marker='x', color='red')
+        plt.xlabel("Epoch")
+        plt.ylabel("IoU")
+        plt.title("Validation IoU Metrics")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(log_dir, "metrics_iou.png"))
+        plt.close()
+
 
 if __name__ == "__main__":
     raw_dataset = load_dataset("merve/scene_parse_150")
@@ -55,7 +95,7 @@ if __name__ == "__main__":
     BATCH_SIZE = (
         16  # TODO: switch to accumulated gradients for larger batch size if OOM
     )
-    NUM_WORKERS = 2  # Multi-processing CPU
+    NUM_WORKERS = 4  # Multi-processing CPU
     PIN_MEMORY = True  # might pressure VRAM but can speed up GPU data transfer
 
     train_loader = DataLoader(
@@ -75,10 +115,10 @@ if __name__ == "__main__":
 
     # for testing/benchmarking, batch size of 1
     test_loader = DataLoader(
-        test_dataset, batch_size=1, shuffle=False, num_workers=2, pin_memory=PIN_MEMORY
+        test_dataset, batch_size=1, shuffle=False, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
     )
 
-    BACKBONE_LR = 5e-5
+    BACKBONE_LR = 2e-5
     UPERNET_LR = 2e-4
     WEIGHT_DECAY = 0.05
 
@@ -105,17 +145,26 @@ if __name__ == "__main__":
         {"params": model.fpn.parameters(), "lr": UPERNET_LR},
         {"params": model.head.parameters(), "lr": UPERNET_LR},
     ]
-    optimizer = AdamW(params, weight_decay=0.05)
+    optimizer = AdamW(params, weight_decay=0.05, fused=True)
     scheduler = lr_scheduler.PolynomialLR(optimizer, total_iters=NUMS_EPOCHS, power=0.9)
 
     if device.type == "cuda":
         model = torch.compile(model)
 
-    total_loss = 0.0
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "metrics.csv")
+    history = []
 
     for epoch in range(NUMS_EPOCHS):
         # training loop
         model.train()
+
+        epoch_loss = 0.0
+        pxl_acc = []
+
+        optimizer.zero_grad(set_to_none=True)
+
         with tqdm(
             train_loader, desc=f"Epoch {epoch + 1}/{NUMS_EPOCHS}", unit="batch"
         ) as tepoch:
@@ -124,7 +173,7 @@ if __name__ == "__main__":
                 masks = masks.to(device)
 
                 # ADE20K background is 0, classes are 1-150. We shift them to 0-149 and ignore background.
-                masks = masks - 1
+                masks = masks.long() - 1
 
                 with torch.autocast(
                     device_type=device.type,
@@ -133,14 +182,32 @@ if __name__ == "__main__":
                     outputs = model(images)
                     loss = loss_fn(outputs, masks)
 
-                    loss.backward()
-                    optimizer.step()
-                    optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
 
-                    loss_val = loss.item()
-                    total_loss += loss_val
+                loss_val = loss.item()
+                epoch_loss += loss_val
 
-                tepoch.set_postfix(loss=loss_val)
+                preds = torch.argmax(outputs, dim=1)
+                pxl_acc.append(compute_pixel_accuracy(preds, masks, ignore_index=-1))
+
+                tepoch.set_postfix(
+                    loss=loss_val,
+                    avg_loss=epoch_loss / (batch + 1),
+                    pxl_acc=np.mean(pxl_acc),
+                )
+            scheduler.step()
+
+        # Metrics for this epoch
+        metrics = {
+            "epoch": epoch + 1,
+            "train_loss": epoch_loss / len(train_loader),
+            "train_acc": np.mean(pxl_acc),
+            "val_acc": None,
+            "val_mIoU": None,
+            "val_biou": None,
+        }
 
         # testing loop every 5 epochs
         if (epoch + 1) % 5 == 0:
@@ -148,9 +215,7 @@ if __name__ == "__main__":
 
             total_mIoU = []
             total_acc = []
-            total_dice = []
             total_biou = []
-            total_ap = []
 
             with torch.no_grad():
                 with tqdm(val_loader, desc="Validation", unit="batch") as tval:
@@ -172,29 +237,25 @@ if __name__ == "__main__":
                         total_mIoU.append(
                             compute_mIoU(preds, masks, num_classes=150, ignore_index=-1)
                         )
-                        total_dice.append(
-                            compute_dice_score(
-                                preds, masks, num_classes=150, ignore_index=-1
-                            )
-                        )
                         total_biou.append(
                             compute_boundary_iou(preds, masks, num_classes=150)
                         )
-                        total_ap.append(
-                            compute_mask_ap(outputs, masks, num_classes=150)
-                        )
-
                         tval.set_postfix(
                             {
                                 "Pxl Acc": f"{np.mean(total_acc):.3f}",
                                 "mIoU": f"{np.mean(total_mIoU):.3f}",
-                                "Dice": f"{np.mean(total_dice):.3f}",
                                 "Bnd IoU": f"{np.mean(total_biou):.3f}",
-                                "Mask AP": f"{np.mean(total_ap):.3f}",
                             }
                         )
 
+            avg_acc = np.mean(total_acc)
             avg_mIoU = np.mean(total_mIoU)
+            avg_biou = np.mean(total_biou)
+
+            metrics["val_acc"] = avg_acc
+            metrics["val_mIoU"] = avg_mIoU
+            metrics["val_biou"] = avg_biou
+
             if avg_mIoU > best_mIoU:
                 best_mIoU = avg_mIoU
 
@@ -207,6 +268,18 @@ if __name__ == "__main__":
                     },
                     weight_path,
                 )
+
+        history.append(metrics)
+
+        # Save to CSV
+        keys = history[0].keys()
+        with open(log_file, "w", newline="") as f:
+            dict_writer = csv.DictWriter(f, fieldnames=keys)
+            dict_writer.writeheader()
+            dict_writer.writerows(history)
+
+        # Plot metrics
+        plot_metrics(history, log_dir)
 
     print("Training complete!")
 

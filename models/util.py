@@ -47,30 +47,6 @@ def compute_pixel_accuracy(preds, targets, ignore_index=255):
     return correct / total if total > 0 else 0.0
 
 
-def compute_dice_score(preds, targets, num_classes=150, ignore_index=None):
-    """Compute the mean macro Dice score (F1) across classes.
-    """
-    dice_per_class = []
-    
-    for c in range(num_classes):
-        if c == ignore_index:
-            continue
-            
-        pred_c = (preds == c)
-        target_c = (targets == c)
-        
-        intersection = (pred_c & target_c).sum().item()
-        cardinality = pred_c.sum().item() + target_c.sum().item()
-        
-        if cardinality == 0:
-            # Class absent in both prediction and target: ignore
-            continue
-            
-        dice = (2.0 * intersection) / cardinality
-        dice_per_class.append(dice)
-        
-    return np.mean(dice_per_class) if len(dice_per_class) > 0 else 0.0
-
 def compute_mIoU(preds, targets, num_classes=150, ignore_index=None):
     """Compute mean Intersection over Union (mIoU) across classes.
     """
@@ -147,38 +123,3 @@ def compute_boundary_iou(preds, targets, num_classes=150, dilation_pixels=2):
         biou_per_class.append(intersection / union)
 
     return np.mean(biou_per_class) if len(biou_per_class) > 0 else 0.0
-
-def compute_mask_ap(pred_logits, targets, num_classes=150):
-    """Compute semantic Average Precision (AP) via area under the precision-recall curve.
-
-    pred_logits: Tensor [B, num_classes, H, W] (raw model outputs before softmax)
-    targets:     Tensor [B, H, W] (ground-truth class IDs)
-    """
-    # Apply softmax to obtain per-class probabilities [B, num_classes, H, W]
-    probs = F.softmax(pred_logits, dim=1)
-
-    probs_np = probs.detach().cpu().numpy()
-    targets_np = targets.detach().cpu().numpy()
-
-    ap_per_class = []
-
-    for c in range(num_classes):
-        target_c = (targets_np == c).astype(int)
-
-        if not np.any(target_c):
-            # No ground-truth for this class in the batch
-            continue
-
-        # Extract predicted probabilities for class c
-        prob_c = probs_np[:, c, :, :].flatten()
-        target_c_flat = target_c.flatten()
-
-        # Compute precision-recall curve
-        precision, recall, _ = precision_recall_curve(target_c_flat, prob_c)
-
-        # Area under the curve (AUC) equals AP for this curve
-        ap = auc(recall, precision)
-        if not np.isnan(ap):
-            ap_per_class.append(ap)
-
-    return np.mean(ap_per_class) if len(ap_per_class) > 0 else 0.0
