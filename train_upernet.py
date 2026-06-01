@@ -3,6 +3,7 @@ from torch.optim import AdamW, lr_scheduler
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2
+from torchvision import tv_tensors
 from tqdm import tqdm
 import numpy as np
 import os
@@ -23,9 +24,10 @@ from models.util import (
     compute_boundary_iou,
 )
 
+
 def plot_metrics(history, log_dir):
     epochs = [h["epoch"] for h in history]
-    
+
     # Plotting Loss
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
@@ -40,7 +42,12 @@ def plot_metrics(history, log_dir):
     plt.plot(epochs, [h["train_acc"] for h in history], label="Train Acc")
     val_epochs = [h["epoch"] for h in history if h["val_acc"] is not None]
     if val_epochs:
-        plt.plot(val_epochs, [h["val_acc"] for h in history if h["val_acc"] is not None], label="Val Acc", marker='o')
+        plt.plot(
+            val_epochs,
+            [h["val_acc"] for h in history if h["val_acc"] is not None],
+            label="Val Acc",
+            marker="o",
+        )
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy")
     plt.title("Accuracy")
@@ -52,8 +59,20 @@ def plot_metrics(history, log_dir):
     # Plotting mIoU
     if val_epochs:
         plt.figure(figsize=(6, 5))
-        plt.plot(val_epochs, [h["val_mIoU"] for h in history if h["val_mIoU"] is not None], label="Val mIoU", marker='o', color='green')
-        plt.plot(val_epochs, [h["val_biou"] for h in history if h["val_biou"] is not None], label="Val Bnd IoU", marker='x', color='red')
+        plt.plot(
+            val_epochs,
+            [h["val_mIoU"] for h in history if h["val_mIoU"] is not None],
+            label="Val mIoU",
+            marker="o",
+            color="green",
+        )
+        plt.plot(
+            val_epochs,
+            [h["val_biou"] for h in history if h["val_biou"] is not None],
+            label="Val Bnd IoU",
+            marker="x",
+            color="red",
+        )
         plt.xlabel("Epoch")
         plt.ylabel("IoU")
         plt.title("Validation IoU Metrics")
@@ -66,12 +85,20 @@ def plot_metrics(history, log_dir):
 if __name__ == "__main__":
     raw_dataset = load_dataset("merve/scene_parse_150")
 
-    # TODO: validate the transformations and augmentations
+    SCALE_RANGE = (0.5, 2.0)
     train_transforms = v2.Compose(
         [
-            v2.Resize((512, 512)),
+            v2.RandomResize(
+                min_size=int(512 * SCALE_RANGE[0]),
+                max_size=int(512 * SCALE_RANGE[1]),
+                antialias=True,
+            ),
+            v2.RandomCrop(
+                size=(512, 512),
+                pad_if_needed=True,
+                fill={tv_tensors.Image: 0, tv_tensors.Mask: -1},
+            ),
             v2.RandomHorizontalFlip(p=0.5),
-            v2.RandomRotation(degrees=10),
             v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -80,7 +107,8 @@ if __name__ == "__main__":
 
     val_test_transforms = v2.Compose(
         [
-            v2.Resize((512, 512)),
+            v2.Resize(size=512, antialias=True),
+            v2.CenterCrop(size=(512, 512)),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -115,7 +143,11 @@ if __name__ == "__main__":
 
     # for testing/benchmarking, batch size of 1
     test_loader = DataLoader(
-        test_dataset, batch_size=1, shuffle=False, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
+        test_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=NUM_WORKERS,
+        pin_memory=PIN_MEMORY,
     )
 
     BACKBONE_LR = 2e-5
