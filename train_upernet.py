@@ -178,7 +178,13 @@ if __name__ == "__main__":
         {"params": model.head.parameters(), "lr": UPERNET_LR},
     ]
     optimizer = AdamW(params, weight_decay=0.05, fused=True)
-    scheduler = lr_scheduler.PolynomialLR(optimizer, total_iters=NUMS_EPOCHS, power=0.9)
+    
+    warmup_epochs = 3
+    scheduler1 = lr_scheduler.LinearLR(optimizer, start_factor=0.01, total_iters=warmup_epochs)
+    scheduler2 = lr_scheduler.PolynomialLR(optimizer, total_iters=NUMS_EPOCHS - warmup_epochs, power=0.9)
+    scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[warmup_epochs])
+    
+    scaler = torch.amp.GradScaler(device.type)
 
     if device.type == "cuda":
         model = torch.compile(model)
@@ -204,8 +210,8 @@ if __name__ == "__main__":
                 images = images.to(device)
                 masks = masks.to(device)
 
-                # ADE20K background is 0, classes are 1-150. We shift them to 0-149 and ignore background.
-                masks = masks.long() - 1
+                # ADE20K background is 0, classes are 1-150. The dataset shifted them to 0-149 and -1 for ignored.
+                masks = masks.long()
 
                 with torch.autocast(
                     device_type=device.type,
@@ -214,8 +220,11 @@ if __name__ == "__main__":
                     outputs = model(images)
                     loss = loss_fn(outputs, masks)
 
-                loss.backward()
-                optimizer.step()
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
                 optimizer.zero_grad(set_to_none=True)
 
                 loss_val = loss.item()
@@ -256,8 +265,8 @@ if __name__ == "__main__":
                         images = images.to(device)
                         masks = masks.to(device)
 
-                        # Shift ADE20K labels: background 0 -> ignore, classes 1-150 -> 0-149
-                        masks = masks - 1
+                        # ADE20K labels shifted in Dataset: background 0 -> ignore, classes 1-150 -> 0-149
+                        masks = masks.long()
 
                         outputs = model(images)
 
@@ -270,7 +279,7 @@ if __name__ == "__main__":
                             compute_mIoU(preds, masks, num_classes=150, ignore_index=-1)
                         )
                         total_biou.append(
-                            compute_boundary_iou(preds, masks, num_classes=150)
+                            compute_boundary_iou(preds, masks, num_classes=150, ignore_index=-1)
                         )
                         tval.set_postfix(
                             {
@@ -325,6 +334,11 @@ if __name__ == "__main__":
     # The test set has no ground-truth masks, so we cannot compute metrics.
     # Save predictions instead for visualization or submission.
     os.makedirs("test_predictions", exist_ok=True)
+    
+    # color palette
+    np.random.seed(42)
+    palette = np.random.randint(0, 255, size=(256, 3), dtype=np.uint8)
+    flattened_palette = palette.flatten().tolist()
 
     with torch.no_grad():
         with tqdm(test_loader, desc="Test Inference", unit="batch") as ttest:
@@ -336,10 +350,11 @@ if __name__ == "__main__":
                 outputs = model(images)
 
                 # Get predictions (argmax) as a NumPy array
-                preds = torch.argmax(outputs, dim=1).cpu().numpy()
+                preds = torch.argmax(outputs, dim=1).cpu().numpy()[0]
 
                 # Save predicted image (batch size = 1 for test_loader)
-                pred_img = Image.fromarray(preds[0].astype(np.uint8))
+                pred_img = Image.fromarray(preds.astype(np.uint8), mode="P")
+                pred_img.putpalette(flattened_palette)
                 pred_img.save(f"test_predictions/pred_test_{i:04d}.png")
 
     print("\nPredictions complete!")

@@ -86,7 +86,7 @@ def _get_boundary(mask, dilation_pixels=2):
     boundary = mask_np - erosion
     return boundary
 
-def compute_boundary_iou(preds, targets, num_classes=150, dilation_pixels=2):
+def compute_boundary_iou(preds, targets, num_classes=150, dilation_pixels=2, ignore_index=-1):
     """Compute IoU restricted to object boundaries (sensitive to fine detail).
 
     preds & targets: Tensors [B, H, W] or [H, W]
@@ -94,6 +94,9 @@ def compute_boundary_iou(preds, targets, num_classes=150, dilation_pixels=2):
     # Convert to CPU NumPy arrays for OpenCV boundary operations
     preds_np = preds.detach().cpu().numpy()
     targets_np = targets.detach().cpu().numpy()
+    
+    valid_mask = (targets_np != ignore_index)
+    preds_np[~valid_mask] = ignore_index
 
     biou_per_class = []
 
