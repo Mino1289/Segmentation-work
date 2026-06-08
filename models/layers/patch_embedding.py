@@ -11,5 +11,7 @@ class PatchEmbedding(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.proj(x).permute(0, 2, 3, 1)  # Sortie : [B, emb_size, H_patch, W_patch]
+        # entrée : [B, C, H, W]
+        x = self.proj(x).permute(0, 2, 3, 1)  
+        # Sortie : [B, H, W, C]
         return x

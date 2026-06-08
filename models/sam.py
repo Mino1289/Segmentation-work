@@ -63,6 +63,7 @@ class SAM(nn.Module):
         padw = self.img_size - w
         return F.pad(x, (0, padw, 0, padh))
 
+    # transforme les logits de sortie du décodeur en masques alignés sur l'image d'entrée
     def postprocess_masks(
         self,
         masks: torch.Tensor,
@@ -75,7 +76,7 @@ class SAM(nn.Module):
             mode="bilinear",
             align_corners=False,
         )
-        masks = masks[..., : input_size[0], : input_size[1]]
+        masks = masks[..., : input_size[0], : input_size[1]] # enlever le padding
         masks = F.interpolate(
             masks, original_size, mode="bilinear", align_corners=False
         )
