@@ -8,9 +8,14 @@ from tqdm import tqdm
 import numpy as np
 import os
 import csv
-import matplotlib.pyplot as plt
 from PIL import Image
 from datasets import load_dataset
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+import sys
 
 from models.upernet import Backbone, UPerNet
 from dataset.ade20k_dataset import ADE20KDataset
@@ -19,6 +24,7 @@ from models.util import (
     num_parameters,
     compute_flops,
     unit,
+    load_state_dict_flexible,
     compute_pixel_accuracy,
     compute_mIoU,
     compute_boundary_iou,
@@ -54,7 +60,7 @@ def plot_metrics(history, log_dir):
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(log_dir, "metrics_accuracy.png"))
-    plt.close()
+    plt.close("all")
 
     # Plotting mIoU
     if val_epochs:
@@ -79,7 +85,7 @@ def plot_metrics(history, log_dir):
         plt.legend()
         plt.tight_layout()
         plt.savefig(os.path.join(log_dir, "metrics_iou.png"))
-        plt.close()
+        plt.close("all")
 
 
 if __name__ == "__main__":
@@ -178,12 +184,18 @@ if __name__ == "__main__":
         {"params": model.head.parameters(), "lr": UPERNET_LR},
     ]
     optimizer = AdamW(params, weight_decay=0.05, fused=True)
-    
+
     warmup_epochs = 3
-    scheduler1 = lr_scheduler.LinearLR(optimizer, start_factor=0.01, total_iters=warmup_epochs)
-    scheduler2 = lr_scheduler.PolynomialLR(optimizer, total_iters=NUMS_EPOCHS - warmup_epochs, power=0.9)
-    scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[warmup_epochs])
-    
+    scheduler1 = lr_scheduler.LinearLR(
+        optimizer, start_factor=0.01, total_iters=warmup_epochs
+    )
+    scheduler2 = lr_scheduler.PolynomialLR(
+        optimizer, total_iters=NUMS_EPOCHS - warmup_epochs, power=0.9
+    )
+    scheduler = lr_scheduler.SequentialLR(
+        optimizer, schedulers=[scheduler1, scheduler2], milestones=[warmup_epochs]
+    )
+
     scaler = torch.amp.GradScaler(device.type)
 
     if device.type == "cuda":
@@ -193,8 +205,38 @@ if __name__ == "__main__":
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "metrics.csv")
     history = []
+    start_epoch = 0
 
-    for epoch in range(NUMS_EPOCHS):
+    if os.path.exists(weight_path):
+        print("Found saved model and optim !")
+        checkpoint = torch.load(weight_path, map_location=device, weights_only=False)
+
+        load_state_dict_flexible(model, checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+        start_epoch = checkpoint["epoch"] + 1
+        best_mIoU = checkpoint["best_mIoU"]
+        print(
+            f"Resume training at epoch {start_epoch + 1}. (best mIoU: {best_mIoU:.4f})"
+        )
+
+        for _ in range(start_epoch):
+            scheduler.step()
+
+        if os.path.exists(log_file):
+            with open(log_file, "r") as f:
+                reader = csv.DictReader(f)
+                history = list(reader)
+                # Reconvertir les chaînes du CSV en types appropriés si nécessaire
+                for h in history:
+                    h["epoch"] = int(h["epoch"])
+                    h["train_loss"] = float(h["train_loss"])
+                    h["train_acc"] = float(h["train_acc"])
+                    h["val_acc"] = float(h["val_acc"]) if h["val_acc"] else None
+                    h["val_mIoU"] = float(h["val_mIoU"]) if h["val_mIoU"] else None
+                    h["val_biou"] = float(h["val_biou"]) if h["val_biou"] else None
+
+    for epoch in range(start_epoch, NUMS_EPOCHS):
         # training loop
         model.train()
 
@@ -215,10 +257,14 @@ if __name__ == "__main__":
 
                 with torch.autocast(
                     device_type=device.type,
-                    dtype=torch.float16,
+                    dtype=torch.bfloat16,
                 ):
                     outputs = model(images)
                     loss = loss_fn(outputs, masks)
+
+                    if torch.isnan(loss) or torch.isinf(loss):
+                        print("This batch contains NaN, ignoring it.", file=sys.stderr)
+                        continue
 
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
@@ -279,7 +325,9 @@ if __name__ == "__main__":
                             compute_mIoU(preds, masks, num_classes=150, ignore_index=-1)
                         )
                         total_biou.append(
-                            compute_boundary_iou(preds, masks, num_classes=150, ignore_index=-1)
+                            compute_boundary_iou(
+                                preds, masks, num_classes=150, ignore_index=-1
+                            )
                         )
                         tval.set_postfix(
                             {
@@ -326,7 +374,7 @@ if __name__ == "__main__":
 
     # end of training loop, best model is saved at weight_path
     # test it
-    model.load_state_dict(torch.load(weight_path)["model_state_dict"])
+    load_state_dict_flexible(model, torch.load(weight_path)["model_state_dict"])
 
     model.eval()
 
@@ -334,7 +382,7 @@ if __name__ == "__main__":
     # The test set has no ground-truth masks, so we cannot compute metrics.
     # Save predictions instead for visualization or submission.
     os.makedirs("test_predictions", exist_ok=True)
-    
+
     # color palette
     np.random.seed(42)
     palette = np.random.randint(0, 255, size=(256, 3), dtype=np.uint8)

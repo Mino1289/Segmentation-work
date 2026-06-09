@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torch.utils.checkpoint import checkpoint
 import timm
 from typing import List
 
@@ -59,11 +58,11 @@ class UPerNet(nn.Module):
         # features = self.backbone(x)
         # fpn_features = self.fpn(features)
         # out = self.head(fpn_features)  # fpn_features est un tuple (P2, P3, P4, P5)
-        features = checkpoint(self.backbone, x, use_reentrant=False)
+        features = self.backbone(x)
         def decode_step(*feats):
             fpn_feats = self.fpn(feats)
             return self.head(fpn_feats)
-        out = checkpoint(decode_step, *features, use_reentrant=False)
+        out = decode_step(*features)
         return out
 
 
