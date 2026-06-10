@@ -74,6 +74,7 @@ class ConvNeXtV2(nn.Module):
         input_shape: Tuple[int, int, int] = (3, 224, 224),
         config: ConvNeXtV2Config = ConvNeXtV2Config(name="base"),
         features_only: bool = False,
+        drop_path_rate: float = 0.4,
         cls_head: bool = True,
         num_classes: int = 1000,
     ):
@@ -88,6 +89,9 @@ class ConvNeXtV2(nn.Module):
         self.blocks = self.config.blocks
         self.channels = self.config.channels
         self.expansion = self.config.expansion
+
+        total_blocks = sum(config.blocks)
+        dp_rates = [x.item() for x in torch.linspace(0, drop_path_rate, total_blocks)]
 
         self.stem = nn.Sequential(
             nn.Conv2d(input_shape[0], self.channels[0], kernel_size=4, stride=4),
@@ -112,7 +116,11 @@ class ConvNeXtV2(nn.Module):
             for block_idx in range(self.blocks[stage_idx]):
                 stage.add_module(
                     f"block{block_idx}",
-                    ConvNeXtV2Block(self.channels[stage_idx], self.expansion),
+                    ConvNeXtV2Block(
+                        self.channels[stage_idx],
+                        self.expansion,
+                        drop_path=dp_rates[block_idx],
+                    ),
                 )
 
             self.stages.append(stage)

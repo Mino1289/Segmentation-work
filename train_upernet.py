@@ -1,4 +1,6 @@
 import torch
+from torch import nn
+import torch.nn.functional as F
 from torch.optim import AdamW, lr_scheduler
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
@@ -29,6 +31,49 @@ from models.util import (
     compute_mIoU,
     compute_boundary_iou,
 )
+
+
+class CombinedLoss(nn.Module):
+    def __init__(self, ignore_index=-1, gamma=2.0, dice_weight=0.5, ce_weight=1.0):
+        super(CombinedLoss, self).__init__()
+        self.ignore_index = ignore_index
+        self.gamma = gamma
+        self.dice_weight = dice_weight
+        self.ce_weight = ce_weight
+
+    def forward(self, inputs, targets):
+        """
+        inputs: (B, C, H, W) - Unnormalized model logits
+        targets: (B, H, W) - Ground truth with values from 0 to 149, and -1 for ignored pixels
+        """
+        # --- 1. Improved Focal / CrossEntropy Loss ---
+        ce_loss = F.cross_entropy(inputs, targets, ignore_index=self.ignore_index, reduction='none')
+        pt = torch.exp(-ce_loss)  # Probability of the correct class
+        focal_loss = ((1 - pt) ** self.gamma * ce_loss).mean()
+
+        # --- 2. Multi-Class Dice Loss ---
+        mask = (targets != self.ignore_index)
+
+        probs = F.softmax(inputs, dim=1)
+        num_classes = inputs.shape[1]
+
+        target_one_hot = F.one_hot(torch.clamp(targets, min=0), num_classes=num_classes)
+        target_one_hot = target_one_hot.permute(0, 3, 1, 2).float()
+
+        mask = mask.unsqueeze(1).expand_as(target_one_hot)
+        probs = probs * mask
+        target_one_hot = target_one_hot * mask
+
+        dims = (0, 2, 3)
+        intersection = torch.sum(probs * target_one_hot, dim=dims)
+        cardinality = torch.sum(probs + target_one_hot, dim=dims)
+
+        dice_coef = (2. * intersection + 1e-6) / (cardinality + 1e-6)
+        dice_loss = 1.0 - dice_coef.mean()
+
+        # --- 3. Final Combination ---
+        total_loss = (self.ce_weight * focal_loss) + (self.dice_weight * dice_loss)
+        return total_loss
 
 
 def plot_metrics(history, log_dir):
@@ -105,7 +150,19 @@ if __name__ == "__main__":
                 fill={tv_tensors.Image: 0, tv_tensors.Mask: -1},
             ),
             v2.RandomHorizontalFlip(p=0.5),
+            v2.RandomPhotometricDistort(
+                brightness=(0.5, 1.5),
+                contrast=(0.5, 1.5),
+                saturation=(0.5, 1.5),
+                hue=(-0.1, 0.1),
+                p=1.0
+            ),
             v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+            v2.RandomApply(
+                [v2.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0))], 
+                p=0.5
+            ),
+            v2.RandomAdjustSharpness(sharpness_factor=2.0, p=0.5),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -156,18 +213,20 @@ if __name__ == "__main__":
         pin_memory=PIN_MEMORY,
     )
 
-    BACKBONE_LR = 2e-5
+    BACKBONE_LR = 1e-5
     UPERNET_LR = 2e-4
     WEIGHT_DECAY = 0.05
 
     NUMS_EPOCHS = 128
 
-    weight_path = "weights/upernet_convnextv2_base.pth"
+    weight_dir = "weights"
+    os.makedirs(weight_dir, exist_ok=True)
+    weight_path = os.path.join(weight_dir, "upernet_convnextv2_base.pth")
     best_mIoU = 0.0
 
     device = get_device()
     print(f"Using device: {device}")
-    backbone = Backbone(model_size="base", pretrained=True)
+    backbone = Backbone(model_size="base", pretrained=True, drop_path_rate=0.4)
     model = UPerNet(backbone, channels=512, num_classes=150)
     model.eval()
     print(f"# parameters: {unit(num_parameters(model))}")
@@ -177,13 +236,13 @@ if __name__ == "__main__":
 
     model.to(device)
 
-    loss_fn = CrossEntropyLoss(ignore_index=-1)
+    loss_fn = CombinedLoss(ignore_index=-1)
     params = [
         {"params": model.backbone.parameters(), "lr": BACKBONE_LR},
         {"params": model.fpn.parameters(), "lr": UPERNET_LR},
         {"params": model.head.parameters(), "lr": UPERNET_LR},
     ]
-    optimizer = AdamW(params, weight_decay=0.05, fused=True)
+    optimizer = AdamW(params, weight_decay=WEIGHT_DECAY, fused=True)
 
     warmup_epochs = 3
     scheduler1 = lr_scheduler.LinearLR(
@@ -252,7 +311,6 @@ if __name__ == "__main__":
                 images = images.to(device)
                 masks = masks.to(device)
 
-                # ADE20K background is 0, classes are 1-150. The dataset shifted them to 0-149 and -1 for ignored.
                 masks = masks.long()
 
                 with torch.autocast(
@@ -269,6 +327,7 @@ if __name__ == "__main__":
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
@@ -391,16 +450,12 @@ if __name__ == "__main__":
     with torch.no_grad():
         with tqdm(test_loader, desc="Test Inference", unit="batch") as ttest:
             for i, (images, _) in enumerate(ttest):
-                # Move input to GPU if available
                 images = images.to(device)
 
-                # Forward pass
                 outputs = model(images)
 
-                # Get predictions (argmax) as a NumPy array
                 preds = torch.argmax(outputs, dim=1).cpu().numpy()[0]
 
-                # Save predicted image (batch size = 1 for test_loader)
                 pred_img = Image.fromarray(preds.astype(np.uint8), mode="P")
                 pred_img.putpalette(flattened_palette)
                 pred_img.save(f"test_predictions/pred_test_{i:04d}.png")
