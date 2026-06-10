@@ -44,34 +44,39 @@ class CombinedLoss(nn.Module):
     def forward(self, inputs, targets):
         """
         inputs: (B, C, H, W) - Unnormalized model logits
-        targets: (B, H, W) - Ground truth with values from 0 to 149, and -1 for ignored pixels
+        targets: (B, H, W) - Ground truth (0 to 149), and -1 for ignored pixels
         """
-        # --- 1. Improved Focal / CrossEntropy Loss ---
-        ce_loss = F.cross_entropy(inputs, targets, ignore_index=self.ignore_index, reduction='none')
+        # 1. Optimized focal / cross-entropy loss
+        ce_loss = F.cross_entropy(
+            inputs, targets, ignore_index=self.ignore_index, reduction="none"
+        )
         pt = torch.exp(-ce_loss)  # Probability of the correct class
         focal_loss = ((1 - pt) ** self.gamma * ce_loss).mean()
 
-        # --- 2. Multi-Class Dice Loss ---
-        mask = (targets != self.ignore_index)
-
-        probs = F.softmax(inputs, dim=1)
+        # 2. Optimized multi-class Dice loss (memory efficient)
         num_classes = inputs.shape[1]
 
-        target_one_hot = F.one_hot(torch.clamp(targets, min=0), num_classes=num_classes)
-        target_one_hot = target_one_hot.permute(0, 3, 1, 2).float()
+        probs = F.softmax(inputs, dim=1)
 
-        mask = mask.unsqueeze(1).expand_as(target_one_hot)
+        mask = (targets != self.ignore_index).unsqueeze(1)  # (B, 1, H, W)
         probs = probs * mask
+
+        clean_targets = torch.clamp(targets, min=0)
+
+        target_one_hot = F.one_hot(clean_targets, num_classes=num_classes)
+        target_one_hot = target_one_hot.permute(0, 3, 1, 2).to(dtype=probs.dtype)
         target_one_hot = target_one_hot * mask
 
-        dims = (0, 2, 3)
-        intersection = torch.sum(probs * target_one_hot, dim=dims)
-        cardinality = torch.sum(probs + target_one_hot, dim=dims)
+        probs_flat = probs.permute(1, 0, 2, 3).reshape(num_classes, -1)
+        target_flat = target_one_hot.permute(1, 0, 2, 3).reshape(num_classes, -1)
 
-        dice_coef = (2. * intersection + 1e-6) / (cardinality + 1e-6)
+        intersection = torch.sum(probs_flat * target_flat, dim=1)
+        cardinality = torch.sum(probs_flat + target_flat, dim=1)
+
+        dice_coef = (2.0 * intersection + 1e-6) / (cardinality + 1e-6)
         dice_loss = 1.0 - dice_coef.mean()
 
-        # --- 3. Final Combination ---
+        # 3. Final combination
         total_loss = (self.ce_weight * focal_loss) + (self.dice_weight * dice_loss)
         return total_loss
 
@@ -79,7 +84,7 @@ class CombinedLoss(nn.Module):
 def plot_metrics(history, log_dir):
     epochs = [h["epoch"] for h in history]
 
-    # Plotting Loss
+    # Plot loss
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
     plt.plot(epochs, [h["train_loss"] for h in history], label="Train Loss")
@@ -88,7 +93,7 @@ def plot_metrics(history, log_dir):
     plt.title("Training Loss")
     plt.legend()
 
-    # Plotting Accuracy
+    # Plot accuracy
     plt.subplot(1, 2, 2)
     plt.plot(epochs, [h["train_acc"] for h in history], label="Train Acc")
     val_epochs = [h["epoch"] for h in history if h["val_acc"] is not None]
@@ -107,7 +112,7 @@ def plot_metrics(history, log_dir):
     plt.savefig(os.path.join(log_dir, "metrics_accuracy.png"))
     plt.close("all")
 
-    # Plotting mIoU
+    # Plot mIoU
     if val_epochs:
         plt.figure(figsize=(6, 5))
         plt.plot(
@@ -155,14 +160,11 @@ if __name__ == "__main__":
                 contrast=(0.5, 1.5),
                 saturation=(0.5, 1.5),
                 hue=(-0.1, 0.1),
-                p=1.0
+                p=1.0,
             ),
-            v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
             v2.RandomApply(
-                [v2.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0))], 
-                p=0.5
+                [v2.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0))], p=0.5
             ),
-            v2.RandomAdjustSharpness(sharpness_factor=2.0, p=0.5),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -183,11 +185,9 @@ if __name__ == "__main__":
     )
     test_dataset = ADE20KDataset(raw_dataset["test"], transform=val_test_transforms)
 
-    BATCH_SIZE = (
-        16  # TODO: switch to accumulated gradients for larger batch size if OOM
-    )
-    NUM_WORKERS = 4  # Multi-processing CPU
-    PIN_MEMORY = True  # might pressure VRAM but can speed up GPU data transfer
+    BATCH_SIZE = 16
+    NUM_WORKERS = 8
+    PIN_MEMORY = True
 
     train_loader = DataLoader(
         train_dataset,
@@ -204,7 +204,7 @@ if __name__ == "__main__":
         pin_memory=PIN_MEMORY,
     )
 
-    # for testing/benchmarking, batch size of 1
+    # Use a batch size of 1 for testing/benchmarking
     test_loader = DataLoader(
         test_dataset,
         batch_size=1,
@@ -286,7 +286,7 @@ if __name__ == "__main__":
             with open(log_file, "r") as f:
                 reader = csv.DictReader(f)
                 history = list(reader)
-                # Reconvertir les chaînes du CSV en types appropriés si nécessaire
+                # Convert CSV strings back to appropriate types when needed
                 for h in history:
                     h["epoch"] = int(h["epoch"])
                     h["train_loss"] = float(h["train_loss"])
@@ -296,7 +296,7 @@ if __name__ == "__main__":
                     h["val_biou"] = float(h["val_biou"]) if h["val_biou"] else None
 
     for epoch in range(start_epoch, NUMS_EPOCHS):
-        # training loop
+        # Training loop
         model.train()
 
         epoch_loss = 0.0
@@ -327,7 +327,7 @@ if __name__ == "__main__":
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                
+
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
@@ -355,7 +355,7 @@ if __name__ == "__main__":
             "val_biou": None,
         }
 
-        # testing loop every 5 epochs
+        # Run validation every 5 epochs
         if (epoch + 1) % 5 == 0:
             model.eval()
 
@@ -370,7 +370,7 @@ if __name__ == "__main__":
                         images = images.to(device)
                         masks = masks.to(device)
 
-                        # ADE20K labels shifted in Dataset: background 0 -> ignore, classes 1-150 -> 0-149
+                        # ADE20K labels are shifted in the dataset: background 0 -> ignore, classes 1-150 -> 0-149
                         masks = masks.long()
 
                         outputs = model(images)
@@ -431,8 +431,8 @@ if __name__ == "__main__":
 
     print("Training complete!")
 
-    # end of training loop, best model is saved at weight_path
-    # test it
+    # End of the training loop, the best model is saved at weight_path
+    # Test it
     load_state_dict_flexible(model, torch.load(weight_path)["model_state_dict"])
 
     model.eval()
@@ -442,7 +442,7 @@ if __name__ == "__main__":
     # Save predictions instead for visualization or submission.
     os.makedirs("test_predictions", exist_ok=True)
 
-    # color palette
+    # Color palette
     np.random.seed(42)
     palette = np.random.randint(0, 255, size=(256, 3), dtype=np.uint8)
     flattened_palette = palette.flatten().tolist()
