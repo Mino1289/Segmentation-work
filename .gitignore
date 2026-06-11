@@ -221,3 +221,4 @@ __marimo__/
 
 test.ipynb
 .DS_Store
+*.pth
