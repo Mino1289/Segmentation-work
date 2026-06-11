@@ -178,7 +178,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     config = DinoV3Config("B")  # embed_dim = 768
-    dino = DinoV3(config=config)
+    dino = DinoV3(config=config, pretrained=True)
     # freeze all dino parameters
     for param in dino.parameters():
         param.requires_grad = False
