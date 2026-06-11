@@ -1,8 +1,8 @@
 import torch
 from torch import nn
+from torchvision.ops import stochastic_depth
 
 from .global_response_normalization import GlobalResponseNormalization
-from .stochastic_depth import StochasticDepth
 
 
 class ConvNeXtV2Block(nn.Module):
@@ -11,6 +11,7 @@ class ConvNeXtV2Block(nn.Module):
 
         self.channels = channels
         self.expansion_ratio = expansion_ratio
+        self.drop_path = drop_path
 
         self.dwconv = nn.Conv2d(
             channels, channels, kernel_size=7, padding=3, groups=channels
@@ -20,8 +21,6 @@ class ConvNeXtV2Block(nn.Module):
         self.activation = nn.GELU()
         self.grn = GlobalResponseNormalization(channels * expansion_ratio)
         self.pwconv2 = nn.Linear(channels * expansion_ratio, channels)
-
-        self.drop_path = StochasticDepth(drop_prob=drop_path)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
@@ -33,4 +32,6 @@ class ConvNeXtV2Block(nn.Module):
         x = self.grn(x)
         x = self.pwconv2(x)
         x = x.permute(0, 3, 1, 2)  # (B, C, H, W)
-        return residual + self.drop_path(x)
+        return residual + stochastic_depth(
+            x, p=self.drop_path, mode="row", training=self.training
+        )

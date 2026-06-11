@@ -46,16 +46,15 @@ class CombinedLoss(nn.Module):
         inputs: (B, C, H, W) - Unnormalized model logits
         targets: (B, H, W) - Ground truth (0 to 149), and -1 for ignored pixels
         """
-        # 1. Optimized focal / cross-entropy loss
+        # --- 1. Optimized Focal / CrossEntropy Loss ---
         ce_loss = F.cross_entropy(
             inputs, targets, ignore_index=self.ignore_index, reduction="none"
         )
         pt = torch.exp(-ce_loss)  # Probability of the correct class
         focal_loss = ((1 - pt) ** self.gamma * ce_loss).mean()
 
-        # 2. Optimized multi-class Dice loss (memory efficient)
+        # --- 2. Dynamically Filtered Multi-Class Dice Loss ---
         num_classes = inputs.shape[1]
-
         probs = F.softmax(inputs, dim=1)
 
         mask = (targets != self.ignore_index).unsqueeze(1)  # (B, 1, H, W)
@@ -63,20 +62,33 @@ class CombinedLoss(nn.Module):
 
         clean_targets = torch.clamp(targets, min=0)
 
-        target_one_hot = F.one_hot(clean_targets, num_classes=num_classes)
-        target_one_hot = target_one_hot.permute(0, 3, 1, 2).to(dtype=probs.dtype)
-        target_one_hot = target_one_hot * mask
+        unique_classes = torch.unique(clean_targets)
+        unique_classes = unique_classes[unique_classes != self.ignore_index]
 
-        probs_flat = probs.permute(1, 0, 2, 3).reshape(num_classes, -1)
-        target_flat = target_one_hot.permute(1, 0, 2, 3).reshape(num_classes, -1)
+        if len(unique_classes) > 0:
+            probs_present = probs[:, unique_classes, ...]
 
-        intersection = torch.sum(probs_flat * target_flat, dim=1)
-        cardinality = torch.sum(probs_flat + target_flat, dim=1)
+            target_one_hot = F.one_hot(clean_targets, num_classes=num_classes)
+            target_one_hot = target_one_hot.permute(0, 3, 1, 2).to(dtype=probs.dtype)
+            target_one_hot = target_one_hot[:, unique_classes, ...] * mask
 
-        dice_coef = (2.0 * intersection + 1e-6) / (cardinality + 1e-6)
-        dice_loss = 1.0 - dice_coef.mean()
+            num_active_classes = len(unique_classes)
+            probs_flat = probs_present.permute(1, 0, 2, 3).reshape(
+                num_active_classes, -1
+            )
+            target_flat = target_one_hot.permute(1, 0, 2, 3).reshape(
+                num_active_classes, -1
+            )
 
-        # 3. Final combination
+            intersection = torch.sum(probs_flat * target_flat, dim=1)
+            cardinality = torch.sum(probs_flat + target_flat, dim=1)
+
+            dice_coef = (2.0 * intersection + 1e-6) / (cardinality + 1e-6)
+            dice_loss = 1.0 - dice_coef.mean()
+        else:
+            dice_loss = 0.0
+
+        # --- 3. Final Combination ---
         total_loss = (self.ce_weight * focal_loss) + (self.dice_weight * dice_loss)
         return total_loss
 
@@ -235,6 +247,7 @@ if __name__ == "__main__":
     )
 
     model.to(device)
+    model = model.to(memory_format=torch.channels_last)
 
     loss_fn = CombinedLoss(ignore_index=-1)
     params = [
@@ -311,6 +324,7 @@ if __name__ == "__main__":
                 images = images.to(device)
                 masks = masks.to(device)
 
+                images = images.to(memory_format=torch.channels_last)
                 masks = masks.long()
 
                 with torch.autocast(
