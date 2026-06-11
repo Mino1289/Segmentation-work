@@ -105,12 +105,6 @@ def _get_boundary(mask, dilation_pixels=2):
     kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT, (dilation_pixels * 2 + 1, dilation_pixels * 2 + 1)
     )
-    
-    if mask_np.ndim > 2:
-        mask_np = mask_np.squeeze() 
-        
-        if mask_np.ndim > 2:
-            raise ValueError(f"Too many dimensions: {mask_np.shape}.")
 
     # Erode to obtain the inner area and subtract to get the boundary
     erosion = cv2.erode(mask_np, kernel, iterations=1)
@@ -132,31 +126,40 @@ def compute_boundary_iou(
     valid_mask = targets_np != ignore_index
     preds_np[~valid_mask] = ignore_index
 
+    # If input is 2D [H, W], add a batch dimension [1, H, W] to unify processing
+    if preds_np.ndim == 2:
+        preds_np = np.expand_dims(preds_np, axis=0)
+        targets_np = np.expand_dims(targets_np, axis=0)
+
+    num_images = preds_np.shape[0]
     biou_per_class = []
 
-    # If batch dimension present [B, H, W], iterating over images is safer for contours
-    if preds_np.ndim == 3:
-        # Simplified approach: either flatten or loop per image. Looping is safer.
-        pass
-
     for c in range(num_classes):
-        pred_c = preds_np == c
-        target_c = targets_np == c
+        total_intersection = 0
+        total_union = 0
+        class_present = False
 
-        if not np.any(target_c) and not np.any(pred_c):
+        # Loop through each image in the batch
+        for i in range(num_images):
+            pred_c = preds_np[i] == c
+            target_c = targets_np[i] == c
+
+            if not np.any(target_c) and not np.any(pred_c):
+                continue
+
+            class_present = True
+
+            # Extract boundary bands for the single 2D slice
+            b_pred = _get_boundary(pred_c, dilation_pixels)
+            b_target = _get_boundary(target_c, dilation_pixels)
+
+            # Accumulate intersection & union for this class across the batch
+            total_intersection += np.logical_and(b_pred, b_target).sum()
+            total_union += np.logical_or(b_pred, b_target).sum()
+
+        if not class_present or total_union == 0:
             continue
 
-        # Extract boundary bands
-        b_pred = _get_boundary(pred_c, dilation_pixels)
-        b_target = _get_boundary(target_c, dilation_pixels)
-
-        # Intersection & union restricted to the extracted boundaries
-        intersection = np.logical_and(b_pred, b_target).sum()
-        union = np.logical_or(b_pred, b_target).sum()
-
-        if union == 0:
-            continue
-
-        biou_per_class.append(intersection / union)
+        biou_per_class.append(total_intersection / total_union)
 
     return np.mean(biou_per_class) if len(biou_per_class) > 0 else 0.0
