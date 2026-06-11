@@ -13,7 +13,7 @@ class DinoV2Config:
         ## tirées de la table 17 de l'article de DinoV2
         configs = {
             "S": {"embed_dim": 384, "num_heads": 6, "depth": 12},
-            "B": {"embed_dim": 768, "num_heads": 12, "depth": 18},
+            "B": {"embed_dim": 768, "num_heads": 12, "depth": 12},
             "L": {"embed_dim": 1024, "num_heads": 16, "depth": 24},
         }
         if name not in configs:
