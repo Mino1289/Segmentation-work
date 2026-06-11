@@ -67,11 +67,8 @@ class DinoV2(nn.Module):
             )
             self.load_from_timm(timm_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, return_all_blocks: bool = False) -> torch.Tensor:
         x = self.patch_embed(x)
-        # sortie [B, H, W, C]
-
-        # ici on veut [B, N, C]
         b, h, w, c = x.shape
         x = x.reshape(b, -1, c)
 
@@ -79,17 +76,24 @@ class DinoV2(nn.Module):
         x = torch.cat((cls_token, x), dim=1)
         x = x + self.pos_embed
 
-        for block in self.blocks:
+        # Stocker les activations si demandé
+        intermediate_outputs = []
+        total_blocks = len(self.blocks)
+        target_layers = list(range(total_blocks - 4, total_blocks))
+
+        for idx, block in enumerate(self.blocks):
             x = block(x)
+            if return_all_blocks and idx in target_layers:
+                intermediate_outputs.append(x)
 
         x = self.norm(x)
 
-        # supprimer le CLS token
+        if return_all_blocks:
+            return intermediate_outputs  # On retourne directement les 4 derniers blocs !
+
+        # Sortie standard
         x = x[:, 1:, :]
-
-        x = x.reshape(b, h, w, c)
-        x = x.permute(0, 3, 1, 2).contiguous()
-
+        x = x.reshape(b, h, w, c).permute(0, 3, 1, 2).contiguous()
         return x
 
     # FONCTION VIBECODEE
