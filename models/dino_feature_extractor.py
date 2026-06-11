@@ -2,14 +2,14 @@ import torch
 import torch.nn as nn
 from typing import Tuple
 
-from models.layers.dino_segmentation_head import DinoLinearSegmentationHead
-
+from .layers.dino_segmentation_head import DinoLinearSegmentationHead
 from .dinov2 import DinoV2
 from .dinov3 import DinoV3
 
 
 class BaseDinoFeatureExtractor(nn.Module):
     """Classe de base pour l'extraction de features multi-couches de modèles DINO."""
+
     def __init__(self, dino_model: nn.Module):
         super().__init__()
         self.dino = dino_model
@@ -28,6 +28,7 @@ class BaseDinoFeatureExtractor(nn.Module):
     def _get_hook(self, name: int):
         def hook(model, input, output):
             self.features[name] = output
+
         return hook
 
     def _extract_patches(self, feat: torch.Tensor) -> torch.Tensor:
@@ -45,14 +46,14 @@ class BaseDinoFeatureExtractor(nn.Module):
         output_features = []
         for idx in self.target_layers:
             feat = self.features[idx]
-            
+
             # 3. Extraction spécifique à la version de DINO (DINOv2 vs DINOv3)
-            patch_feats = self._extract_patches(feat) # [B, N_patches, embed_dim]
+            patch_feats = self._extract_patches(feat)  # [B, N_patches, embed_dim]
 
             # 4. Reshape en grille spatiale: [B, N, C] -> [B, C, hp, wp]
             B, _, C = patch_feats.shape
             patch_feats = patch_feats.transpose(1, 2).view(B, C, hp, wp)
-            
+
             output_features.append(patch_feats)
 
         # 5. Concaténation finale sur la dimension des channels
@@ -81,7 +82,7 @@ class DinoV3FeatureExtractor(BaseDinoFeatureExtractor):
     def _extract_patches(self, feat: torch.Tensor) -> torch.Tensor:
         # Pour DinoV3 (RoPE), il n'y a pas de CLS token dans la séquence
         return feat
-    
+
 
 class DinoLinearADE20K(nn.Module):
     def __init__(

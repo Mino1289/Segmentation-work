@@ -1,12 +1,10 @@
 import torch
 from torch import nn
-from typing import Tuple
 
 # from visualization.dino_visualization import visualize_attention
-from models.dino_feature_extractor import DinoV2FeatureExtractor
 from models.layers.dino_block import DinoBlock
 from models.layers.patch_embedding import PatchEmbedding
-from models.layers.dino_segmentation_head import DinoLinearSegmentationHead, DinoSegmentationHead
+from models.layers.dino_segmentation_head import DinoSegmentationHead
 
 
 class DinoV2Config:

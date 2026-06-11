@@ -36,7 +36,6 @@ from models.util import (
 )
 
 
-
 def plot_metrics(history, log_dir):
     epochs = [h["epoch"] for h in history]
 
@@ -96,19 +95,35 @@ def plot_metrics(history, log_dir):
 
 if __name__ == "__main__":
     raw_dataset = load_dataset("merve/scene_parse_150")
-    
+
     IMG_SIZE = 512
 
     SCALE_RANGE = (0.5, 2.0)
-    train_transforms = v2.Compose([
-        v2.RandomResize(min_size=int(IMG_SIZE * SCALE_RANGE[0]), max_size=int(IMG_SIZE * SCALE_RANGE[1]), antialias=True),
-        v2.RandomCrop(size=(IMG_SIZE, IMG_SIZE), pad_if_needed=True, fill={tv_tensors.Image: 0, tv_tensors.Mask: -1}),
-        v2.RandomHorizontalFlip(p=0.5),
-        # On baisse la probabilité à 0.5 et on adoucit les amplitudes pour ne pas déboussoler le ViT
-        v2.RandomPhotometricDistort(brightness=(0.8, 1.2), contrast=(0.8, 1.2), saturation=(0.8, 1.2), hue=(-0.05, 0.05), p=0.5),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
+    train_transforms = v2.Compose(
+        [
+            v2.RandomResize(
+                min_size=int(IMG_SIZE * SCALE_RANGE[0]),
+                max_size=int(IMG_SIZE * SCALE_RANGE[1]),
+                antialias=True,
+            ),
+            v2.RandomCrop(
+                size=(IMG_SIZE, IMG_SIZE),
+                pad_if_needed=True,
+                fill={tv_tensors.Image: 0, tv_tensors.Mask: -1},
+            ),
+            v2.RandomHorizontalFlip(p=0.5),
+            # On baisse la probabilité à 0.5 et on adoucit les amplitudes pour ne pas déboussoler le ViT
+            v2.RandomPhotometricDistort(
+                brightness=(0.8, 1.2),
+                contrast=(0.8, 1.2),
+                saturation=(0.8, 1.2),
+                hue=(-0.05, 0.05),
+                p=0.5,
+            ),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
 
     val_test_transforms = v2.Compose(
         [
@@ -187,7 +202,11 @@ if __name__ == "__main__":
 
     loss_fn = nn.CrossEntropyLoss(ignore_index=-1)
 
-    optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LR, weight_decay=WEIGHT_DECAY)
+    optimizer = AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=LR,
+        weight_decay=WEIGHT_DECAY,
+    )
 
     warmup_epochs = 3
     scheduler1 = lr_scheduler.LinearLR(
@@ -370,3 +389,4 @@ if __name__ == "__main__":
 
         # Plot metrics
         plot_metrics(history, log_dir)
+    print("Training complete!")

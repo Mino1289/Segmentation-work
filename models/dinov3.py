@@ -1,10 +1,7 @@
 import torch
 from torch import nn
-from typing import Tuple
 
-from models.dino_feature_extractor import DinoV3FeatureExtractor
 from models.layers.dino_block import DinoBlock
-from models.layers.dino_segmentation_head import DinoLinearSegmentationHead
 from models.layers.patch_embedding import PatchEmbedding
 from models.layers.rotary_embedding import RopePositionEmbedding2D
 
@@ -86,29 +83,3 @@ class DinoV3(nn.Module):
         x = x.permute(0, 3, 1, 2).contiguous()
 
         return x
-
-
-class DinoV3LinearADE20K(nn.Module):
-    def __init__(
-        self,
-        backbone: DinoV3FeatureExtractor,
-        num_classes: int = 150,
-    ):
-        super().__init__()
-        self.backbone = backbone
-        self.segmentation_head = DinoLinearSegmentationHead(
-            in_channels=backbone.embed_dim * 4, num_classes=num_classes
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B, C, H, W = x.shape
-        # 1. Extraire les features concaténées des 4 derniers blocs
-        features = self.backbone(x)  # [B, embed_dim*4, H_patch, W_patch]
-
-        # 2. Passer par la tête de segmentation linéaire
-        target_size = (H, W)  # (H_orig, W_orig)
-        logits = self.segmentation_head(
-            features, target_size=target_size
-        )  # [B, num_classes, H_orig, W_orig]
-
-        return logits

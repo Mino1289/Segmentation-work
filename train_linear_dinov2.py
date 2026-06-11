@@ -14,6 +14,9 @@ from PIL import Image
 from datasets import load_dataset
 import matplotlib
 
+from models.dino_feature_extractor import DinoLinearADE20K, DinoV2FeatureExtractor
+from models.dinov2 import DinoV2, DinoV2Config
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -31,66 +34,6 @@ from models.util import (
     compute_mIoU,
     compute_boundary_iou,
 )
-
-
-class CombinedLoss(nn.Module):
-    def __init__(self, ignore_index=-1, gamma=2.0, dice_weight=0.5, ce_weight=1.0):
-        super(CombinedLoss, self).__init__()
-        self.ignore_index = ignore_index
-        self.gamma = gamma
-        self.dice_weight = dice_weight
-        self.ce_weight = ce_weight
-
-    def forward(self, inputs, targets):
-        """
-        inputs: (B, C, H, W) - Unnormalized model logits
-        targets: (B, H, W) - Ground truth (0 to 149), and -1 for ignored pixels
-        """
-        # --- 1. Optimized Focal / CrossEntropy Loss ---
-        ce_loss = F.cross_entropy(
-            inputs, targets, ignore_index=self.ignore_index, reduction="none"
-        )
-        pt = torch.exp(-ce_loss)  # Probability of the correct class
-        focal_loss = ((1 - pt) ** self.gamma * ce_loss).mean()
-
-        # --- 2. Dynamically Filtered Multi-Class Dice Loss ---
-        num_classes = inputs.shape[1]
-        probs = F.softmax(inputs, dim=1)
-
-        mask = (targets != self.ignore_index).unsqueeze(1)  # (B, 1, H, W)
-        probs = probs * mask
-
-        clean_targets = torch.clamp(targets, min=0)
-
-        unique_classes = torch.unique(clean_targets)
-        unique_classes = unique_classes[unique_classes != self.ignore_index]
-
-        if len(unique_classes) > 0:
-            probs_present = probs[:, unique_classes, ...]
-
-            target_one_hot = F.one_hot(clean_targets, num_classes=num_classes)
-            target_one_hot = target_one_hot.permute(0, 3, 1, 2).to(dtype=probs.dtype)
-            target_one_hot = target_one_hot[:, unique_classes, ...] * mask
-
-            num_active_classes = len(unique_classes)
-            probs_flat = probs_present.permute(1, 0, 2, 3).reshape(
-                num_active_classes, -1
-            )
-            target_flat = target_one_hot.permute(1, 0, 2, 3).reshape(
-                num_active_classes, -1
-            )
-
-            intersection = torch.sum(probs_flat * target_flat, dim=1)
-            cardinality = torch.sum(probs_flat + target_flat, dim=1)
-
-            dice_coef = (2.0 * intersection + 1e-6) / (cardinality + 1e-6)
-            dice_loss = 1.0 - dice_coef.mean()
-        else:
-            dice_loss = 0.0
-
-        # --- 3. Final Combination ---
-        total_loss = (self.ce_weight * focal_loss) + (self.dice_weight * dice_loss)
-        return total_loss
 
 
 def plot_metrics(history, log_dir):
@@ -153,29 +96,29 @@ def plot_metrics(history, log_dir):
 if __name__ == "__main__":
     raw_dataset = load_dataset("merve/scene_parse_150")
 
+    IMG_SIZE = 518
+
     SCALE_RANGE = (0.5, 2.0)
     train_transforms = v2.Compose(
         [
             v2.RandomResize(
-                min_size=int(512 * SCALE_RANGE[0]),
-                max_size=int(512 * SCALE_RANGE[1]),
+                min_size=int(IMG_SIZE * SCALE_RANGE[0]),
+                max_size=int(IMG_SIZE * SCALE_RANGE[1]),
                 antialias=True,
             ),
             v2.RandomCrop(
-                size=(512, 512),
+                size=(IMG_SIZE, IMG_SIZE),
                 pad_if_needed=True,
                 fill={tv_tensors.Image: 0, tv_tensors.Mask: -1},
             ),
             v2.RandomHorizontalFlip(p=0.5),
+            # On baisse la probabilité à 0.5 et on adoucit les amplitudes pour ne pas déboussoler le ViT
             v2.RandomPhotometricDistort(
-                brightness=(0.5, 1.5),
-                contrast=(0.5, 1.5),
-                saturation=(0.5, 1.5),
-                hue=(-0.1, 0.1),
-                p=1.0,
-            ),
-            v2.RandomApply(
-                [v2.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0))], p=0.5
+                brightness=(0.8, 1.2),
+                contrast=(0.8, 1.2),
+                saturation=(0.8, 1.2),
+                hue=(-0.05, 0.05),
+                p=0.5,
             ),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -184,8 +127,8 @@ if __name__ == "__main__":
 
     val_test_transforms = v2.Compose(
         [
-            v2.Resize(size=512, antialias=True),
-            v2.CenterCrop(size=(512, 512)),
+            v2.Resize(size=IMG_SIZE, antialias=True),
+            v2.CenterCrop(size=(IMG_SIZE, IMG_SIZE)),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -197,7 +140,7 @@ if __name__ == "__main__":
     )
     test_dataset = ADE20KDataset(raw_dataset["test"], transform=val_test_transforms)
 
-    BATCH_SIZE = 16
+    BATCH_SIZE = 32
     NUM_WORKERS = 8
     PIN_MEMORY = True
 
@@ -225,50 +168,56 @@ if __name__ == "__main__":
         pin_memory=PIN_MEMORY,
     )
 
-    BACKBONE_LR = 1e-5
-    UPERNET_LR = 2e-4
-    WEIGHT_DECAY = 0.05
+    LR = 1e-3
+    WEIGHT_DECAY = 1e-4
 
-    NUMS_EPOCHS = 128
+    NUMS_EPOCHS = 30
 
     weight_dir = "weights"
     os.makedirs(weight_dir, exist_ok=True)
-    weight_path = os.path.join(weight_dir, "upernet_convnextv2_base.pth")
+    weight_path = os.path.join(weight_dir, "linear_dinov2_base.pth")
     best_mIoU = 0.0
 
     device = get_device()
     print(f"Using device: {device}")
-    backbone = Backbone(model_size="base", pretrained=True, drop_path_rate=0.4)
-    model = UPerNet(backbone, channels=512, num_classes=150)
+
+    config = DinoV2Config("B")  # embed_dim = 768
+    dino = DinoV2(config=config)
+    # freeze all dino parameters
+    for param in dino.parameters():
+        param.requires_grad = False
+
+    feature_extractor = DinoV2FeatureExtractor(dino)
+    model = DinoLinearADE20K(backbone=feature_extractor, num_classes=150)
+
     model.eval()
+
     print(f"# parameters: {unit(num_parameters(model))}")
     print(
-        f"# FLOPs @ 512x512: {unit(compute_flops(model, input_size=(3, 512, 512)))}\n"
+        f"# FLOPs @ {IMG_SIZE}x{IMG_SIZE}: {unit(compute_flops(model, input_size=(3, IMG_SIZE, IMG_SIZE)))}\n"
     )
 
     model.to(device)
     model = model.to(memory_format=torch.channels_last)
 
-    loss_fn = CombinedLoss(ignore_index=-1)
-    params = [
-        {"params": model.backbone.parameters(), "lr": BACKBONE_LR},
-        {"params": model.fpn.parameters(), "lr": UPERNET_LR},
-        {"params": model.head.parameters(), "lr": UPERNET_LR},
-    ]
-    optimizer = AdamW(params, weight_decay=WEIGHT_DECAY, fused=True)
+    loss_fn = nn.CrossEntropyLoss(ignore_index=-1)
+
+    optimizer = AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=LR,
+        weight_decay=WEIGHT_DECAY,
+    )
 
     warmup_epochs = 3
     scheduler1 = lr_scheduler.LinearLR(
         optimizer, start_factor=0.01, total_iters=warmup_epochs
     )
-    scheduler2 = lr_scheduler.PolynomialLR(
-        optimizer, total_iters=NUMS_EPOCHS - warmup_epochs, power=0.9
+    scheduler2 = lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=NUMS_EPOCHS - warmup_epochs, eta_min=1e-6
     )
     scheduler = lr_scheduler.SequentialLR(
         optimizer, schedulers=[scheduler1, scheduler2], milestones=[warmup_epochs]
     )
-
-    scaler = torch.amp.GradScaler(device.type)
 
     if device.type == "cuda":
         model = torch.compile(model)
@@ -338,12 +287,10 @@ if __name__ == "__main__":
                         print("This batch contains NaN, ignoring it.", file=sys.stderr)
                         continue
 
-                scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
 
-                scaler.step(optimizer)
-                scaler.update()
                 optimizer.zero_grad(set_to_none=True)
 
                 loss_val = loss.item()
@@ -442,5 +389,4 @@ if __name__ == "__main__":
 
         # Plot metrics
         plot_metrics(history, log_dir)
-
     print("Training complete!")
