@@ -13,7 +13,11 @@ class DinoSelfAttention(nn.Module):
         self.proj = nn.Linear(embed_dim, embed_dim)
 
     def forward(
-        self, x: torch.Tensor, sin: torch.Tensor = None, cos: torch.Tensor = None
+        self,
+        x: torch.Tensor,
+        sin: torch.Tensor = None,
+        cos: torch.Tensor = None,
+        num_prefix_tokens: int = 0,
     ) -> torch.Tensor:
         # x de dimension [B, N, C]
         b, n, c = x.shape
@@ -30,8 +34,18 @@ class DinoSelfAttention(nn.Module):
         # dimensions de q, k et v :[B, num_heads, N+1, head_dim]
 
         if sin is not None and cos is not None:
-            q = apply_rotary_pos_emb(q, sin, cos)
-            k = apply_rotary_pos_emb(k, sin, cos)
+            if num_prefix_tokens > 0:
+                q_prefix, q_patches = q[:, :, :num_prefix_tokens, :], q[:, :, num_prefix_tokens:, :]
+                k_prefix, k_patches = k[:, :, :num_prefix_tokens, :], k[:, :, num_prefix_tokens:, :]
+                q = torch.cat(
+                    [q_prefix, apply_rotary_pos_emb(q_patches, sin, cos)], dim=2
+                )
+                k = torch.cat(
+                    [k_prefix, apply_rotary_pos_emb(k_patches, sin, cos)], dim=2
+                )
+            else:
+                q = apply_rotary_pos_emb(q, sin, cos)
+                k = apply_rotary_pos_emb(k, sin, cos)
 
         attention_tensor = torch.nn.functional.scaled_dot_product_attention(q, k, v)
         # dimesion de attention_tensor : [B, num_heads, N+1, head_dim]

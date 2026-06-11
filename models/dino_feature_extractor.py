@@ -79,8 +79,7 @@ class DinoV3FeatureExtractor(BaseDinoFeatureExtractor):
         super().__init__(dino_model)
 
     def _extract_patches(self, feat: torch.Tensor) -> torch.Tensor:
-        # Pour DinoV3 (RoPE), il n'y a pas de CLS token dans la séquence
-        return feat
+        return feat[:, self.dino.num_storage_tokens :, :]
 
 
 class DinoLinearADE20K(nn.Module):

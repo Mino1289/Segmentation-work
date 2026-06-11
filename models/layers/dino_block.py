@@ -22,11 +22,22 @@ class DinoBlock(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, sin: torch.Tensor = None, cos: torch.Tensor = None
+        self,
+        x: torch.Tensor,
+        sin: torch.Tensor = None,
+        cos: torch.Tensor = None,
+        num_prefix_tokens: int = 0,
     ) -> torch.Tensor:
         # additionner le x pour les skip connections
         # tout en 1 ligne pour garder toutes les infos
-        x = x + self.ls1(self.attn(self.norm1(x), sin=sin, cos=cos))
+        x = x + self.ls1(
+            self.attn(
+                self.norm1(x),
+                sin=sin,
+                cos=cos,
+                num_prefix_tokens=num_prefix_tokens,
+            )
+        )
 
         x = x + self.ls2(self.mlp(self.norm2(x)))
 

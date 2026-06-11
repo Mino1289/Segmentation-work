@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import timm
 
 # from visualization.dino_visualization import visualize_attention
 from models.layers.dino_block import DinoBlock
@@ -31,6 +32,7 @@ class DinoV2(nn.Module):
         config: DinoV2Config = DinoV2Config(name="S"),
         image_size: int = 518,
         patch_size: int = 14,
+        pretrained: bool = True,
     ):
         super().__init__()
 
@@ -51,6 +53,19 @@ class DinoV2(nn.Module):
             [DinoBlock(self.embed_dim, self.num_heads) for _ in range(self.depth)]
         )
         self.norm = nn.LayerNorm(normalized_shape=self.embed_dim, eps=1e-6)
+        
+        if pretrained:
+            timm_models = {
+                "S": "vit_small_patch14_dinov2",
+                "B": "vit_base_patch14_dinov2",
+                "L": "vit_large_patch14_dinov2",
+            }
+            timm_model = timm.create_model(
+                timm_models[self.config.name],
+                pretrained=True,
+                num_classes=0,
+            )
+            self.load_from_timm(timm_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch_embed(x)
