@@ -2,7 +2,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.optim import AdamW, lr_scheduler
-from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from torchvision import tv_tensors
@@ -10,7 +9,6 @@ from tqdm import tqdm
 import numpy as np
 import os
 import csv
-from PIL import Image
 from datasets import load_dataset
 import matplotlib
 

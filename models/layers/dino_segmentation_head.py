@@ -37,7 +37,9 @@ class DinoLinearSegmentationHead(nn.Module):
             in_channels=in_channels, out_channels=num_classes, kernel_size=1
         )
 
-    def forward(self, concatenated_features: torch.Tensor, target_size: tuple) -> torch.Tensor:
+    def forward(
+        self, concatenated_features: torch.Tensor, target_size: tuple
+    ) -> torch.Tensor:
         """
         Args:
             concatenated_features: Tenseur [B, In_Channels, H_patch, W_patch]

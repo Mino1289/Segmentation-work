@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from typing import Tuple
 
 from .layers.dino_segmentation_head import DinoLinearSegmentationHead
 from .dinov2 import DinoV2

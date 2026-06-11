@@ -25,6 +25,7 @@ def num_parameters(model: nn.Module) -> int:
 def compute_flops(model: nn.Module, input_size: tuple) -> int:
     return torchprofile.profile_macs(model, torch.randn(1, *input_size))
 
+
 def unit(v: int):
     units = ["", "k", "M", "G", "T", "P"]
     i = 0
@@ -65,35 +66,35 @@ def compute_pixel_accuracy(preds, targets, ignore_index=255):
     preds:   [B, H, W] or [H, W] (Tensor of predicted class IDs)
     targets: [B, H, W] or [H, W] (Tensor of ground-truth class IDs)
     """
-    valid_mask = (targets != ignore_index)
+    valid_mask = targets != ignore_index
     correct = (preds[valid_mask] == targets[valid_mask]).sum().item()
     total = valid_mask.sum().item()
     return correct / total if total > 0 else 0.0
 
 
 def compute_mIoU(preds, targets, num_classes=150, ignore_index=None):
-    """Compute mean Intersection over Union (mIoU) across classes.
-    """
+    """Compute mean Intersection over Union (mIoU) across classes."""
     iou_per_class = []
-    
+
     for c in range(num_classes):
         if c == ignore_index:
             continue
-            
-        pred_c = (preds == c)
-        target_c = (targets == c)
-        
+
+        pred_c = preds == c
+        target_c = targets == c
+
         intersection = (pred_c & target_c).sum().item()
         union = (pred_c | target_c).sum().item()
-        
+
         if union == 0:
             # No ground truth and no prediction for this class
             continue
-            
+
         iou = intersection / union
         iou_per_class.append(iou)
-        
+
     return np.mean(iou_per_class) if len(iou_per_class) > 0 else 0.0
+
 
 def _get_boundary(mask, dilation_pixels=2):
     """Extract the boundary of a binary mask using morphological operations.
@@ -110,7 +111,10 @@ def _get_boundary(mask, dilation_pixels=2):
     boundary = mask_np - erosion
     return boundary
 
-def compute_boundary_iou(preds, targets, num_classes=150, dilation_pixels=2, ignore_index=-1):
+
+def compute_boundary_iou(
+    preds, targets, num_classes=150, dilation_pixels=2, ignore_index=-1
+):
     """Compute IoU restricted to object boundaries (sensitive to fine detail).
 
     preds & targets: Tensors [B, H, W] or [H, W]
@@ -118,8 +122,8 @@ def compute_boundary_iou(preds, targets, num_classes=150, dilation_pixels=2, ign
     # Convert to CPU NumPy arrays for OpenCV boundary operations
     preds_np = preds.detach().cpu().numpy()
     targets_np = targets.detach().cpu().numpy()
-    
-    valid_mask = (targets_np != ignore_index)
+
+    valid_mask = targets_np != ignore_index
     preds_np[~valid_mask] = ignore_index
 
     biou_per_class = []
@@ -130,8 +134,8 @@ def compute_boundary_iou(preds, targets, num_classes=150, dilation_pixels=2, ign
         pass
 
     for c in range(num_classes):
-        pred_c = (preds_np == c)
-        target_c = (targets_np == c)
+        pred_c = preds_np == c
+        target_c = targets_np == c
 
         if not np.any(target_c) and not np.any(pred_c):
             continue

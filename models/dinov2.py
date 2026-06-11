@@ -32,7 +32,6 @@ class DinoV2(nn.Module):
         image_size: int = 518,
         patch_size: int = 14,
     ):
-
         super().__init__()
 
         self.config = config

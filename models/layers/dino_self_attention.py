@@ -28,7 +28,7 @@ class DinoSelfAttention(nn.Module):
 
         q, k, v = torch.unbind(redimensionnement, dim=0)
         # dimensions de q, k et v :[B, num_heads, N+1, head_dim]
-        
+
         if sin is not None and cos is not None:
             q = apply_rotary_pos_emb(q, sin, cos)
             k = apply_rotary_pos_emb(k, sin, cos)

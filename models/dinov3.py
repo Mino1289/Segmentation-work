@@ -8,7 +8,6 @@ from models.layers.rotary_embedding import RopePositionEmbedding2D
 
 class DinoV3Config:
     def __init__(self, name: str = "S"):
-
         configs = {
             "S": {"embed_dim": 384, "num_heads": 6, "depth": 12},
             "B": {"embed_dim": 768, "num_heads": 12, "depth": 18},

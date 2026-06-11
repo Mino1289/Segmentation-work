@@ -1,6 +1,4 @@
 import torch
-from torch import nn
-import torch.nn.functional as F
 from torch.optim import AdamW, lr_scheduler
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
@@ -10,7 +8,6 @@ from tqdm import tqdm
 import numpy as np
 import os
 import csv
-from PIL import Image
 from datasets import load_dataset
 import matplotlib
 
@@ -22,7 +19,6 @@ import matplotlib.pyplot as plt
 
 import sys
 
-from models.upernet import Backbone, UPerNet
 from dataset.ade20k_dataset import ADE20KDataset
 from models.util import (
     get_device,
@@ -200,7 +196,7 @@ if __name__ == "__main__":
     model.to(device)
     model = model.to(memory_format=torch.channels_last)
 
-    loss_fn = nn.CrossEntropyLoss(ignore_index=-1)
+    loss_fn = CrossEntropyLoss(ignore_index=-1)
 
     optimizer = AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),

@@ -76,7 +76,7 @@ class SAM(nn.Module):
             mode="bilinear",
             align_corners=False,
         )
-        masks = masks[..., : input_size[0], : input_size[1]] # enlever le padding
+        masks = masks[..., : input_size[0], : input_size[1]]  # enlever le padding
         masks = F.interpolate(
             masks, original_size, mode="bilinear", align_corners=False
         )
@@ -168,10 +168,15 @@ class SAM(nn.Module):
         # 2. Image Encoder Neck & Blocks
         for i in range(4):
             for suf in w_b:
-                map_key(f"image_encoder.neck.{i}.{suf}", f"image_encoder.convs.{i}.{suf}")
+                map_key(
+                    f"image_encoder.neck.{i}.{suf}", f"image_encoder.convs.{i}.{suf}"
+                )
 
         for i in range(32):
-            src_p, dst_p = f"image_encoder.blocks.{i}", f"image_encoder.sam_vit.encoder.{i}"
+            src_p, dst_p = (
+                f"image_encoder.blocks.{i}",
+                f"image_encoder.sam_vit.encoder.{i}",
+            )
             for suf in w_b:
                 map_key(f"{src_p}.norm1.{suf}", f"{dst_p}.norm1.{suf}")
                 map_key(f"{src_p}.norm2.{suf}", f"{dst_p}.norm2.{suf}")
@@ -226,7 +231,10 @@ class SAM(nn.Module):
         # 5. Mask Decoder Transformer Layers & Final Attention
         projs = ["q_proj", "k_proj", "v_proj", "out_proj"]
         for i in range(2):
-            src_p, dst_p = f"mask_decoder.transformer.layers.{i}", f"mask_decoder.layers.{i}"
+            src_p, dst_p = (
+                f"mask_decoder.transformer.layers.{i}",
+                f"mask_decoder.layers.{i}",
+            )
             for suf in w_b:
                 for n in ["1", "2", "3", "4"]:
                     map_key(f"{src_p}.norm{n}.{suf}", f"{dst_p}.norm{n}.{suf}")
@@ -235,7 +243,10 @@ class SAM(nn.Module):
 
             for proj in projs:
                 for suf in w_b:
-                    map_key(f"{src_p}.self_attn.{proj}.{suf}", f"{dst_p}.self_attn.{proj}.{suf}")
+                    map_key(
+                        f"{src_p}.self_attn.{proj}.{suf}",
+                        f"{dst_p}.self_attn.{proj}.{suf}",
+                    )
                     map_key(
                         f"{src_p}.cross_attn_token_to_image.{proj}.{suf}",
                         f"{dst_p}.cross_attn_tok_to_img.{proj}.{suf}",
@@ -255,7 +266,6 @@ class SAM(nn.Module):
 
         self.load_state_dict(new_state_dict, strict=False)
         return self
-
 
 
 if __name__ == "__main__":
