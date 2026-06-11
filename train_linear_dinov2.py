@@ -28,8 +28,6 @@ from models.util import (
     unit,
     load_state_dict_flexible,
     compute_pixel_accuracy,
-    compute_mIoU,
-    compute_boundary_iou,
 )
 
 
@@ -74,13 +72,6 @@ def plot_metrics(history, log_dir):
             marker="o",
             color="green",
         )
-        plt.plot(
-            val_epochs,
-            [h["val_biou"] for h in history if h["val_biou"] is not None],
-            label="Val Bnd IoU",
-            marker="x",
-            color="red",
-        )
         plt.xlabel("Epoch")
         plt.ylabel("IoU")
         plt.title("Validation IoU Metrics")
@@ -91,8 +82,8 @@ def plot_metrics(history, log_dir):
 
 
 if __name__ == "__main__":
-    torch.set_float32_matmul_precision('high')
-    
+    torch.set_float32_matmul_precision("high")
+
     raw_dataset = load_dataset("merve/scene_parse_150")
 
     IMG_SIZE = 518
@@ -312,7 +303,6 @@ if __name__ == "__main__":
             "train_acc": np.mean(pxl_acc),
             "val_acc": None,
             "val_mIoU": None,
-            "val_biou": None,
         }
 
         # Run validation every 5 epochs
@@ -330,7 +320,7 @@ if __name__ == "__main__":
                     preds = torch.argmax(outputs, dim=1)
 
                     metric.update(preds, masks, ignore_index=-1)
-                    
+
             avg_acc, avg_mIoU = metric.compute()
 
             metrics["val_acc"] = avg_acc

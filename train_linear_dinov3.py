@@ -21,14 +21,13 @@ import sys
 
 from dataset.ade20k_dataset import ADE20KDataset
 from models.util import (
+    SegmentationMetric,
     get_device,
     num_parameters,
     compute_flops,
     unit,
     load_state_dict_flexible,
     compute_pixel_accuracy,
-    compute_mIoU,
-    compute_boundary_iou,
 )
 
 
@@ -73,13 +72,6 @@ def plot_metrics(history, log_dir):
             marker="o",
             color="green",
         )
-        plt.plot(
-            val_epochs,
-            [h["val_biou"] for h in history if h["val_biou"] is not None],
-            label="Val Bnd IoU",
-            marker="x",
-            color="red",
-        )
         plt.xlabel("Epoch")
         plt.ylabel("IoU")
         plt.title("Validation IoU Metrics")
@@ -90,8 +82,8 @@ def plot_metrics(history, log_dir):
 
 
 if __name__ == "__main__":
-    torch.set_float32_matmul_precision('high')
-    
+    torch.set_float32_matmul_precision("high")
+
     raw_dataset = load_dataset("merve/scene_parse_150")
 
     IMG_SIZE = 512
@@ -311,57 +303,33 @@ if __name__ == "__main__":
             "train_acc": np.mean(pxl_acc),
             "val_acc": None,
             "val_mIoU": None,
-            "val_biou": None,
         }
 
         # Run validation every 5 epochs
         if (epoch + 1) % 5 == 0:
             model.eval()
 
-            total_mIoU = []
-            total_acc = []
-            total_biou = []
+            metric = SegmentationMetric(num_classes=150)
 
             with torch.no_grad():
-                with tqdm(val_loader, desc="Validation", unit="batch") as tval:
-                    for images, masks in tval:
-                        # Move data to GPU if available
-                        images = images.to(device)
-                        masks = masks.to(device)
+                for images, masks in val_loader:
+                    # Move data to GPU if available
+                    images = images.to(device)
+                    masks = masks.to(device)
 
-                        # ADE20K labels are shifted in the dataset: background 0 -> ignore, classes 1-150 -> 0-149
-                        masks = masks.long()
+                    # ADE20K labels are shifted in the dataset: background 0 -> ignore, classes 1-150 -> 0-149
+                    masks = masks.long()
+                    outputs = model(images)
 
-                        outputs = model(images)
+                    preds = torch.argmax(outputs, dim=1)
 
-                        preds = torch.argmax(outputs, dim=1)
+                    metric.update(preds, masks, ignore_index=-1)
 
-                        total_acc.append(
-                            compute_pixel_accuracy(preds, masks, ignore_index=-1)
-                        )
-                        total_mIoU.append(
-                            compute_mIoU(preds, masks, num_classes=150, ignore_index=-1)
-                        )
-                        total_biou.append(
-                            compute_boundary_iou(
-                                preds, masks, num_classes=150, ignore_index=-1
-                            )
-                        )
-                        tval.set_postfix(
-                            {
-                                "Pxl Acc": f"{np.mean(total_acc):.3f}",
-                                "mIoU": f"{np.mean(total_mIoU):.3f}",
-                                "Bnd IoU": f"{np.mean(total_biou):.3f}",
-                            }
-                        )
-
-            avg_acc = np.mean(total_acc)
-            avg_mIoU = np.mean(total_mIoU)
-            avg_biou = np.mean(total_biou)
+            avg_acc, avg_mIoU = metric.compute()
 
             metrics["val_acc"] = avg_acc
             metrics["val_mIoU"] = avg_mIoU
-            metrics["val_biou"] = avg_biou
+            print(f"Validation => Pxl Acc: {avg_acc:.4f} | mIoU: {avg_mIoU:.4f}")
 
             if avg_mIoU > best_mIoU:
                 best_mIoU = avg_mIoU

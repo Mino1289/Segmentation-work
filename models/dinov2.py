@@ -52,10 +52,10 @@ class DinoV2(nn.Module):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, self.embed_dim))
         self.blocks = nn.ModuleList(
-            [DinoBlock(self.embed_dim, self.num_heads, dinov2=True) for _ in range(self.depth)]
+            [DinoBlock(self.embed_dim, self.num_heads) for _ in range(self.depth)]
         )
         self.norm = nn.LayerNorm(normalized_shape=self.embed_dim, eps=1e-6)
-        
+
         if pretrained:
             timm_models = {
                 "S": "vit_small_patch14_dinov2",
@@ -91,7 +91,9 @@ class DinoV2(nn.Module):
         x = self.norm(x)
 
         if return_all_blocks:
-            return intermediate_outputs  # On retourne directement les 4 derniers blocs !
+            return (
+                intermediate_outputs  # On retourne directement les 4 derniers blocs !
+            )
 
         # Sortie standard
         x = x[:, 1:, :]
@@ -120,30 +122,38 @@ class DinoV2(nn.Module):
 
                 # 🚀 INTERPOLATION DU POS_EMBED EN CAS DE CHANGEMENT DE RÉSOLUTION
                 if k_custom == "pos_embed" and v_custom.shape != v_timm.shape:
-                    print(f" Interpolation de {k_custom} : {v_timm.shape} -> {v_custom.shape}")
+                    print(
+                        f" Interpolation de {k_custom} : {v_timm.shape} -> {v_custom.shape}"
+                    )
                     num_prefix = 1  # 1 CLS token pour DINOv2
-                    
+
                     timm_prefix = v_timm[:, :num_prefix, :]
                     timm_grid = v_timm[:, num_prefix:, :]
-                    
+
                     # Déduire la taille de la grille (H = W)
                     grid_size_timm = int(math.sqrt(timm_grid.shape[1]))
                     grid_size_custom = int(math.sqrt(v_custom.shape[1] - num_prefix))
-                    
+
                     # [1, N, C] -> [1, C, H, W] pour l'interpolation 2D
-                    timm_grid_2d = timm_grid.reshape(1, grid_size_timm, grid_size_timm, -1).permute(0, 3, 1, 2)
-                    
+                    timm_grid_2d = timm_grid.reshape(
+                        1, grid_size_timm, grid_size_timm, -1
+                    ).permute(0, 3, 1, 2)
+
                     custom_grid_2d = F.interpolate(
-                        timm_grid_2d, 
-                        size=(grid_size_custom, grid_size_custom), 
-                        mode="bicubic", 
-                        align_corners=False
+                        timm_grid_2d,
+                        size=(grid_size_custom, grid_size_custom),
+                        mode="bicubic",
+                        align_corners=False,
                     )
-                    
+
                     # Retour au format [1, N, C]
-                    custom_grid = custom_grid_2d.permute(0, 2, 3, 1).reshape(1, -1, v_timm.shape[-1])
-                    
-                    new_state_dict[k_custom] = torch.cat((timm_prefix, custom_grid), dim=1)
+                    custom_grid = custom_grid_2d.permute(0, 2, 3, 1).reshape(
+                        1, -1, v_timm.shape[-1]
+                    )
+
+                    new_state_dict[k_custom] = torch.cat(
+                        (timm_prefix, custom_grid), dim=1
+                    )
                     loaded_keys.append(f"{k_custom} (interpolée)")
 
                 # Matching standard
@@ -151,14 +161,16 @@ class DinoV2(nn.Module):
                     new_state_dict[k_custom] = v_timm
                     loaded_keys.append(k_custom)
                 else:
-                    mismatch_keys.append(f"{k_custom}: custom {v_custom.shape} != timm {v_timm.shape}")
+                    mismatch_keys.append(
+                        f"{k_custom}: custom {v_custom.shape} != timm {v_timm.shape}"
+                    )
             else:
                 ignored_keys.append(k_timm)
 
         missing_in_custom, unexpected_in_custom = self.load_state_dict(
             new_state_dict, strict=False
         )
-        
+
         print(f" {len(loaded_keys)} tenseurs chargés.")
         if mismatch_keys:
             print(f" {len(mismatch_keys)} erreurs de dimensions (ignorées).")

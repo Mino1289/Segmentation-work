@@ -35,8 +35,14 @@ class DinoSelfAttention(nn.Module):
 
         if sin is not None and cos is not None:
             if num_prefix_tokens > 0:
-                q_prefix, q_patches = q[:, :, :num_prefix_tokens, :], q[:, :, num_prefix_tokens:, :]
-                k_prefix, k_patches = k[:, :, :num_prefix_tokens, :], k[:, :, num_prefix_tokens:, :]
+                q_prefix, q_patches = (
+                    q[:, :, :num_prefix_tokens, :],
+                    q[:, :, num_prefix_tokens:, :],
+                )
+                k_prefix, k_patches = (
+                    k[:, :, :num_prefix_tokens, :],
+                    k[:, :, num_prefix_tokens:, :],
+                )
                 q = torch.cat(
                     [q_prefix, apply_rotary_pos_emb(q_patches, sin, cos)], dim=2
                 )

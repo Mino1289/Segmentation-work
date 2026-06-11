@@ -13,7 +13,7 @@ class DinoV3Config:
     def __init__(self, name: str = "S"):
         configs = {
             "S": {"embed_dim": 384, "num_heads": 6, "depth": 12},
-            "B": {"embed_dim": 768, "num_heads": 12, "depth": 18},
+            "B": {"embed_dim": 768, "num_heads": 12, "depth": 12},
             "L": {"embed_dim": 1024, "num_heads": 16, "depth": 24},
         }
         if name not in configs:
@@ -57,15 +57,11 @@ class DinoV3(nn.Module):
         self.reg_token = nn.Parameter(torch.zeros(1, num_reg_tokens, self.embed_dim))
 
         self.blocks = nn.ModuleList(
-            [
-                DinoBlock(self.embed_dim, self.num_heads, dinov3=True)
-                for _ in range(self.depth)
-            ]
+            [DinoBlock(self.embed_dim, self.num_heads) for _ in range(self.depth)]
         )
 
         self.layer_norm = nn.LayerNorm(normalized_shape=self.embed_dim, eps=1e-6)
-        
-                
+
         if pretrained:
             timm_models = {
                 "S": "vit_small_patch16_dinov3",
@@ -121,11 +117,9 @@ class DinoV3(nn.Module):
         x = x.permute(0, 3, 1, 2).contiguous()
 
         return x
-    
+
     def _remap_timm_key(self, key: str) -> str | None:
         if key.startswith("head."):
-            return None
-        if key.startswith("pos_embed"):
             return None
         if key.startswith("norm."):
             return key.replace("norm.", "layer_norm.", 1)
@@ -173,6 +167,11 @@ class DinoV3(nn.Module):
                     if block.attn.qkv.bias is not None:
                         block.attn.qkv.bias.zero_()
 
+                custom_state = dict(self.named_parameters())
+                for missing in missing_in_custom:
+                    if missing.endswith(".bias") and missing in custom_state:
+                        custom_state[missing].zero_()
+
         print(f" {len(loaded_keys)} tenseurs de poids chargés avec succès.")
 
         if mismatch_keys:
@@ -207,9 +206,11 @@ if __name__ == "__main__":
         "L": "vit_large_patch16_dinov3",
     }
 
-    timm_model = timm.create_model(
-        timm_models[size], pretrained=True, num_classes=0
-    ).eval().to(device)
+    timm_model = (
+        timm.create_model(timm_models[size], pretrained=True, num_classes=0)
+        .eval()
+        .to(device)
+    )
 
     config = DinoV3Config(name=size)
     mymodel = DinoV3(
@@ -259,13 +260,13 @@ if __name__ == "__main__":
             num_prefix_tokens=num_storage_tokens,
         )
 
-        tokens_timm, rope = timm_model._pos_embed(
-            timm_model.patch_embed(dummy_input)
-        )
+        tokens_timm, rope = timm_model._pos_embed(timm_model.patch_embed(dummy_input))
         block0_timm = timm_model.blocks[0](tokens_timm, rope=rope)[
             :, num_storage_tokens:, :
         ]
-        block0_diff = (block0_custom[:, num_storage_tokens:, :] - block0_timm).abs().max().item()
+        block0_diff = (
+            (block0_custom[:, num_storage_tokens:, :] - block0_timm).abs().max().item()
+        )
 
     print("MyModel Output shape :", output.shape)
     print("Timm Output shape    :", output_timm.shape)
