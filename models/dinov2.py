@@ -2,9 +2,10 @@ import torch
 from torch import nn
 from typing import Tuple
 
-from visualization.dino_visualization import visualize_attention
-from layers.dino_block import DinoBlock
-from layers.patch_embedding import PatchEmbedding
+#from visualization.dino_visualization import visualize_attention
+from models.layers.dino_block import DinoBlock
+from models.layers.patch_embedding import PatchEmbedding
+from models.layers.dino_segmentation_head import DinoSegmentationHead
 
 
 class DinoV2Config:
@@ -122,6 +123,26 @@ class DinoV2(nn.Module):
             for m in missing_in_custom[:5]: print(f"  - {m}")
         return self
     
+    
+class DinoV2ADE20K(nn.Module):
+    def __init__(self, backbone: nn.Module, num_classes :int=150):
+        super().__init__()
+        self.backbone = backbone
+        
+        #freeze les poids du backbone
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        
+        self.head = DinoSegmentationHead(in_channels=384, num_classes = num_classes)
+    
+    def forward(self, x):
+        target_size = (x.shape[2], x.shape[3])
+        
+        with torch.no_grad():
+            features = self.backbone(x)
+        masks = self.head(features, target_size)
+        return masks
+        
     
 #FONCTION VIBECODEE
 if __name__ == "__main__":
