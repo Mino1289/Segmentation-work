@@ -72,28 +72,50 @@ def compute_pixel_accuracy(preds, targets, ignore_index=255):
     return correct / total if total > 0 else 0.0
 
 
-def compute_mIoU(preds, targets, num_classes=150, ignore_index=None):
-    """Compute mean Intersection over Union (mIoU) across classes."""
-    iou_per_class = []
+class SegmentationMetric:
+    """Calcule l'Accuracy globale et le mIoU en accumulant la matrice de confusion."""
 
-    for c in range(num_classes):
-        if c == ignore_index:
-            continue
+    def __init__(self, num_classes: int = 150):
+        self.num_classes = num_classes
+        self.hist = np.zeros((num_classes, num_classes))
 
-        pred_c = preds == c
-        target_c = targets == c
+    def update(
+        self, preds: torch.Tensor, targets: torch.Tensor, ignore_index: int = -1
+    ):
+        # Conversion en CPU et aplatissement
+        preds = preds.detach().cpu().numpy().flatten()
+        targets = targets.detach().cpu().numpy().flatten()
 
-        intersection = (pred_c & target_c).sum().item()
-        union = (pred_c | target_c).sum().item()
+        # Filtrage des pixels ignorés et des valeurs aberrantes
+        valid_mask = (
+            (targets != ignore_index) & (targets >= 0) & (targets < self.num_classes)
+        )
+        preds = preds[valid_mask]
+        targets = targets[valid_mask]
 
-        if union == 0:
-            # No ground truth and no prediction for this class
-            continue
+        # Accumulation ultra-rapide via bincount (Matrice de confusion 1D reformée en 2D)
+        self.hist += np.bincount(
+            self.num_classes * targets + preds, minlength=self.num_classes**2
+        ).reshape(self.num_classes, self.num_classes)
 
-        iou = intersection / union
-        iou_per_class.append(iou)
+    def compute(self):
+        # La diagonale contient les vrais positifs (Intersection)
+        intersection = np.diag(self.hist)
+        # L'union est la somme de la ligne + colonne - l'intersection
+        union = self.hist.sum(axis=1) + self.hist.sum(axis=0) - intersection
 
-    return np.mean(iou_per_class) if len(iou_per_class) > 0 else 0.0
+        # Masque de sécurité pour éviter la division par zéro sur les classes absentes
+        valid_classes = union > 0
+        iou = np.zeros(self.num_classes)
+        iou[valid_classes] = intersection[valid_classes] / union[valid_classes]
+
+        mIoU = np.mean(iou[valid_classes]) if np.any(valid_classes) else 0.0
+        pixel_acc = intersection.sum() / (self.hist.sum() + 1e-10)
+
+        return pixel_acc, mIoU
+
+    def reset(self):
+        self.hist = np.zeros((self.num_classes, self.num_classes))
 
 
 def _get_boundary(mask, dilation_pixels=2):

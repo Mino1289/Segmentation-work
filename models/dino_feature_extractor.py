@@ -7,7 +7,7 @@ from .dinov3 import DinoV3
 
 
 class BaseDinoFeatureExtractor(nn.Module):
-    """Classe de base corrigée pour l'extraction de features."""
+    """Classe de base pour l'extraction de features."""
 
     def __init__(self, dino_model):
         super().__init__()

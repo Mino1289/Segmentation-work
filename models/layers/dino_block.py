@@ -7,18 +7,18 @@ from .layer_scale import LayerScale
 
 
 class DinoBlock(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int, dinov3: bool = False):
+    def __init__(self, embed_dim: int, num_heads: int, dinov2: bool = False):
         super().__init__()
         self.norm1 = nn.LayerNorm(normalized_shape=embed_dim, eps=1e-6)
         self.attn = DinoSelfAttention(embed_dim=embed_dim, num_heads=num_heads)
         self.ls1 = (
-            LayerScale(channels=embed_dim, init_value=1e-5) if dinov3 else nn.Identity()
+            LayerScale(channels=embed_dim, init_value=1e-5) if dinov2 else nn.Identity()
         )
 
         self.norm2 = nn.LayerNorm(normalized_shape=embed_dim, eps=1e-6)
         self.mlp = DinoMLP(embed_dim)
         self.ls2 = (
-            LayerScale(channels=embed_dim, init_value=1e-5) if dinov3 else nn.Identity()
+            LayerScale(channels=embed_dim, init_value=1e-5) if dinov2 else nn.Identity()
         )
 
     def forward(
