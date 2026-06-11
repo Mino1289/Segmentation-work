@@ -90,6 +90,8 @@ def plot_metrics(history, log_dir):
 
 
 if __name__ == "__main__":
+    torch.set_float32_matmul_precision('high')
+    
     raw_dataset = load_dataset("merve/scene_parse_150")
 
     IMG_SIZE = 512

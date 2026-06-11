@@ -105,6 +105,12 @@ def _get_boundary(mask, dilation_pixels=2):
     kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT, (dilation_pixels * 2 + 1, dilation_pixels * 2 + 1)
     )
+    
+    if mask_np.ndim > 2:
+        mask_np = mask_np.squeeze() 
+        
+        if mask_np.ndim > 2:
+            raise ValueError(f"Too many dimensions: {mask_np.shape}.")
 
     # Erode to obtain the inner area and subtract to get the boundary
     erosion = cv2.erode(mask_np, kernel, iterations=1)
