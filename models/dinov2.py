@@ -125,7 +125,7 @@ class DinoV2(nn.Module):
     
     
 class DinoV2ADE20K(nn.Module):
-    def __init__(self, backbone: nn.Module, num_classes :int=150):
+    def __init__(self, backbone: nn.Module, num_classes :int=150, embed_dim:int=384):
         super().__init__()
         self.backbone = backbone
         
@@ -133,7 +133,7 @@ class DinoV2ADE20K(nn.Module):
         for param in self.backbone.parameters():
             param.requires_grad = False
         
-        self.head = DinoSegmentationHead(in_channels=384, num_classes = num_classes)
+        self.head = DinoSegmentationHead(in_channels=embed_dim, num_classes = num_classes)
     
     def forward(self, x):
         target_size = (x.shape[2], x.shape[3])
