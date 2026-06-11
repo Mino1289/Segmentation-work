@@ -1,4 +1,6 @@
 import torch
+from torch import nn
+import torch.nn.functional as F
 from torch.optim import AdamW, lr_scheduler
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
@@ -8,9 +10,14 @@ from tqdm import tqdm
 import numpy as np
 import os
 import csv
-import matplotlib.pyplot as plt
 from PIL import Image
 from datasets import load_dataset
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+import sys
 
 from models.upernet import Backbone, UPerNet
 from dataset.ade20k_dataset import ADE20KDataset
@@ -19,16 +26,65 @@ from models.util import (
     num_parameters,
     compute_flops,
     unit,
+    load_state_dict_flexible,
     compute_pixel_accuracy,
     compute_mIoU,
     compute_boundary_iou,
 )
 
 
+class CombinedLoss(nn.Module):
+    def __init__(self, ignore_index=-1, gamma=2.0, dice_weight=0.5, ce_weight=1.0):
+        super(CombinedLoss, self).__init__()
+        self.ignore_index = ignore_index
+        self.gamma = gamma
+        self.dice_weight = dice_weight
+        self.ce_weight = ce_weight
+
+    def forward(self, inputs, targets):
+        """
+        inputs: (B, C, H, W) - Unnormalized model logits
+        targets: (B, H, W) - Ground truth (0 to 149), and -1 for ignored pixels
+        """
+        # 1. Optimized focal / cross-entropy loss
+        ce_loss = F.cross_entropy(
+            inputs, targets, ignore_index=self.ignore_index, reduction="none"
+        )
+        pt = torch.exp(-ce_loss)  # Probability of the correct class
+        focal_loss = ((1 - pt) ** self.gamma * ce_loss).mean()
+
+        # 2. Optimized multi-class Dice loss (memory efficient)
+        num_classes = inputs.shape[1]
+
+        probs = F.softmax(inputs, dim=1)
+
+        mask = (targets != self.ignore_index).unsqueeze(1)  # (B, 1, H, W)
+        probs = probs * mask
+
+        clean_targets = torch.clamp(targets, min=0)
+
+        target_one_hot = F.one_hot(clean_targets, num_classes=num_classes)
+        target_one_hot = target_one_hot.permute(0, 3, 1, 2).to(dtype=probs.dtype)
+        target_one_hot = target_one_hot * mask
+
+        probs_flat = probs.permute(1, 0, 2, 3).reshape(num_classes, -1)
+        target_flat = target_one_hot.permute(1, 0, 2, 3).reshape(num_classes, -1)
+
+        intersection = torch.sum(probs_flat * target_flat, dim=1)
+        cardinality = torch.sum(probs_flat + target_flat, dim=1)
+
+        dice_coef = (2.0 * intersection + 1e-6) / (cardinality + 1e-6)
+        dice_loss = 1.0 - dice_coef.mean()
+
+        # 3. Final combination
+        total_loss = (self.ce_weight * focal_loss) + (self.dice_weight * dice_loss)
+        return total_loss
+
+
 def plot_metrics(history, log_dir):
     epochs = [h["epoch"] for h in history]
 
-    # Plotting Loss
+    # Plot loss
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
     plt.plot(epochs, [h["train_loss"] for h in history], label="Train Loss")
@@ -37,7 +93,7 @@ def plot_metrics(history, log_dir):
     plt.title("Training Loss")
     plt.legend()
 
-    # Plotting Accuracy
+    # Plot accuracy
     plt.subplot(1, 2, 2)
     plt.plot(epochs, [h["train_acc"] for h in history], label="Train Acc")
     val_epochs = [h["epoch"] for h in history if h["val_acc"] is not None]
@@ -54,9 +110,9 @@ def plot_metrics(history, log_dir):
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(log_dir, "metrics_accuracy.png"))
-    plt.close()
+    plt.close("all")
 
-    # Plotting mIoU
+    # Plot mIoU
     if val_epochs:
         plt.figure(figsize=(6, 5))
         plt.plot(
@@ -79,7 +135,7 @@ def plot_metrics(history, log_dir):
         plt.legend()
         plt.tight_layout()
         plt.savefig(os.path.join(log_dir, "metrics_iou.png"))
-        plt.close()
+        plt.close("all")
 
 
 if __name__ == "__main__":
@@ -99,7 +155,16 @@ if __name__ == "__main__":
                 fill={tv_tensors.Image: 0, tv_tensors.Mask: -1},
             ),
             v2.RandomHorizontalFlip(p=0.5),
-            v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+            v2.RandomPhotometricDistort(
+                brightness=(0.5, 1.5),
+                contrast=(0.5, 1.5),
+                saturation=(0.5, 1.5),
+                hue=(-0.1, 0.1),
+                p=1.0,
+            ),
+            v2.RandomApply(
+                [v2.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0))], p=0.5
+            ),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -120,11 +185,9 @@ if __name__ == "__main__":
     )
     test_dataset = ADE20KDataset(raw_dataset["test"], transform=val_test_transforms)
 
-    BATCH_SIZE = (
-        16  # TODO: switch to accumulated gradients for larger batch size if OOM
-    )
-    NUM_WORKERS = 4  # Multi-processing CPU
-    PIN_MEMORY = True  # might pressure VRAM but can speed up GPU data transfer
+    BATCH_SIZE = 16
+    NUM_WORKERS = 8
+    PIN_MEMORY = True
 
     train_loader = DataLoader(
         train_dataset,
@@ -141,7 +204,7 @@ if __name__ == "__main__":
         pin_memory=PIN_MEMORY,
     )
 
-    # for testing/benchmarking, batch size of 1
+    # Use a batch size of 1 for testing/benchmarking
     test_loader = DataLoader(
         test_dataset,
         batch_size=1,
@@ -150,18 +213,20 @@ if __name__ == "__main__":
         pin_memory=PIN_MEMORY,
     )
 
-    BACKBONE_LR = 2e-5
+    BACKBONE_LR = 1e-5
     UPERNET_LR = 2e-4
     WEIGHT_DECAY = 0.05
 
     NUMS_EPOCHS = 128
 
-    weight_path = "weights/upernet_convnextv2_base.pth"
+    weight_dir = "weights"
+    os.makedirs(weight_dir, exist_ok=True)
+    weight_path = os.path.join(weight_dir, "upernet_convnextv2_base.pth")
     best_mIoU = 0.0
 
     device = get_device()
     print(f"Using device: {device}")
-    backbone = Backbone(model_size="base", pretrained=True)
+    backbone = Backbone(model_size="base", pretrained=True, drop_path_rate=0.4)
     model = UPerNet(backbone, channels=512, num_classes=150)
     model.eval()
     print(f"# parameters: {unit(num_parameters(model))}")
@@ -171,19 +236,25 @@ if __name__ == "__main__":
 
     model.to(device)
 
-    loss_fn = CrossEntropyLoss(ignore_index=-1)
+    loss_fn = CombinedLoss(ignore_index=-1)
     params = [
         {"params": model.backbone.parameters(), "lr": BACKBONE_LR},
         {"params": model.fpn.parameters(), "lr": UPERNET_LR},
         {"params": model.head.parameters(), "lr": UPERNET_LR},
     ]
-    optimizer = AdamW(params, weight_decay=0.05, fused=True)
-    
+    optimizer = AdamW(params, weight_decay=WEIGHT_DECAY, fused=True)
+
     warmup_epochs = 3
-    scheduler1 = lr_scheduler.LinearLR(optimizer, start_factor=0.01, total_iters=warmup_epochs)
-    scheduler2 = lr_scheduler.PolynomialLR(optimizer, total_iters=NUMS_EPOCHS - warmup_epochs, power=0.9)
-    scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[warmup_epochs])
-    
+    scheduler1 = lr_scheduler.LinearLR(
+        optimizer, start_factor=0.01, total_iters=warmup_epochs
+    )
+    scheduler2 = lr_scheduler.PolynomialLR(
+        optimizer, total_iters=NUMS_EPOCHS - warmup_epochs, power=0.9
+    )
+    scheduler = lr_scheduler.SequentialLR(
+        optimizer, schedulers=[scheduler1, scheduler2], milestones=[warmup_epochs]
+    )
+
     scaler = torch.amp.GradScaler(device.type)
 
     if device.type == "cuda":
@@ -193,9 +264,39 @@ if __name__ == "__main__":
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "metrics.csv")
     history = []
+    start_epoch = 0
 
-    for epoch in range(NUMS_EPOCHS):
-        # training loop
+    if os.path.exists(weight_path):
+        print("Found saved model and optim !")
+        checkpoint = torch.load(weight_path, map_location=device, weights_only=False)
+
+        load_state_dict_flexible(model, checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+        start_epoch = checkpoint["epoch"] + 1
+        best_mIoU = checkpoint["best_mIoU"]
+        print(
+            f"Resume training at epoch {start_epoch + 1}. (best mIoU: {best_mIoU:.4f})"
+        )
+
+        for _ in range(start_epoch):
+            scheduler.step()
+
+        if os.path.exists(log_file):
+            with open(log_file, "r") as f:
+                reader = csv.DictReader(f)
+                history = list(reader)
+                # Convert CSV strings back to appropriate types when needed
+                for h in history:
+                    h["epoch"] = int(h["epoch"])
+                    h["train_loss"] = float(h["train_loss"])
+                    h["train_acc"] = float(h["train_acc"])
+                    h["val_acc"] = float(h["val_acc"]) if h["val_acc"] else None
+                    h["val_mIoU"] = float(h["val_mIoU"]) if h["val_mIoU"] else None
+                    h["val_biou"] = float(h["val_biou"]) if h["val_biou"] else None
+
+    for epoch in range(start_epoch, NUMS_EPOCHS):
+        # Training loop
         model.train()
 
         epoch_loss = 0.0
@@ -210,19 +311,23 @@ if __name__ == "__main__":
                 images = images.to(device)
                 masks = masks.to(device)
 
-                # ADE20K background is 0, classes are 1-150. The dataset shifted them to 0-149 and -1 for ignored.
                 masks = masks.long()
 
                 with torch.autocast(
                     device_type=device.type,
-                    dtype=torch.float16,
+                    dtype=torch.bfloat16,
                 ):
                     outputs = model(images)
                     loss = loss_fn(outputs, masks)
 
+                    if torch.isnan(loss) or torch.isinf(loss):
+                        print("This batch contains NaN, ignoring it.", file=sys.stderr)
+                        continue
+
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
@@ -250,7 +355,7 @@ if __name__ == "__main__":
             "val_biou": None,
         }
 
-        # testing loop every 5 epochs
+        # Run validation every 5 epochs
         if (epoch + 1) % 5 == 0:
             model.eval()
 
@@ -265,7 +370,7 @@ if __name__ == "__main__":
                         images = images.to(device)
                         masks = masks.to(device)
 
-                        # ADE20K labels shifted in Dataset: background 0 -> ignore, classes 1-150 -> 0-149
+                        # ADE20K labels are shifted in the dataset: background 0 -> ignore, classes 1-150 -> 0-149
                         masks = masks.long()
 
                         outputs = model(images)
@@ -279,7 +384,9 @@ if __name__ == "__main__":
                             compute_mIoU(preds, masks, num_classes=150, ignore_index=-1)
                         )
                         total_biou.append(
-                            compute_boundary_iou(preds, masks, num_classes=150, ignore_index=-1)
+                            compute_boundary_iou(
+                                preds, masks, num_classes=150, ignore_index=-1
+                            )
                         )
                         tval.set_postfix(
                             {
@@ -324,9 +431,9 @@ if __name__ == "__main__":
 
     print("Training complete!")
 
-    # end of training loop, best model is saved at weight_path
-    # test it
-    model.load_state_dict(torch.load(weight_path)["model_state_dict"])
+    # End of the training loop, the best model is saved at weight_path
+    # Test it
+    load_state_dict_flexible(model, torch.load(weight_path)["model_state_dict"])
 
     model.eval()
 
@@ -334,8 +441,8 @@ if __name__ == "__main__":
     # The test set has no ground-truth masks, so we cannot compute metrics.
     # Save predictions instead for visualization or submission.
     os.makedirs("test_predictions", exist_ok=True)
-    
-    # color palette
+
+    # Color palette
     np.random.seed(42)
     palette = np.random.randint(0, 255, size=(256, 3), dtype=np.uint8)
     flattened_palette = palette.flatten().tolist()
@@ -343,16 +450,12 @@ if __name__ == "__main__":
     with torch.no_grad():
         with tqdm(test_loader, desc="Test Inference", unit="batch") as ttest:
             for i, (images, _) in enumerate(ttest):
-                # Move input to GPU if available
                 images = images.to(device)
 
-                # Forward pass
                 outputs = model(images)
 
-                # Get predictions (argmax) as a NumPy array
                 preds = torch.argmax(outputs, dim=1).cpu().numpy()[0]
 
-                # Save predicted image (batch size = 1 for test_loader)
                 pred_img = Image.fromarray(preds.astype(np.uint8), mode="P")
                 pred_img.putpalette(flattened_palette)
                 pred_img.save(f"test_predictions/pred_test_{i:04d}.png")

@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torch.utils.checkpoint import checkpoint
 import timm
 from typing import List
 
@@ -15,11 +14,13 @@ class Backbone(nn.Module):
         model_size: str = "base",
         input_shape: tuple = (3, 512, 512),
         pretrained: bool = True,
+        drop_path_rate: float = 0.4,
     ):
         super().__init__()
         self.model_size = model_size
         self.pretrained = pretrained
         self.input_shape = input_shape
+        self.drop_path_rate = drop_path_rate
 
         self.config = ConvNeXtV2Config(name=self.model_size)
 
@@ -28,6 +29,7 @@ class Backbone(nn.Module):
             config=self.config,
             features_only=True,
             cls_head=False,
+            drop_path_rate=self.drop_path_rate,
         )
         if self.pretrained:
             timm_model = timm.create_model(
@@ -59,11 +61,13 @@ class UPerNet(nn.Module):
         # features = self.backbone(x)
         # fpn_features = self.fpn(features)
         # out = self.head(fpn_features)  # fpn_features est un tuple (P2, P3, P4, P5)
-        features = checkpoint(self.backbone, x, use_reentrant=False)
+        features = self.backbone(x)
+
         def decode_step(*feats):
             fpn_feats = self.fpn(feats)
             return self.head(fpn_feats)
-        out = checkpoint(decode_step, *features, use_reentrant=False)
+
+        out = decode_step(*features)
         return out
 
 

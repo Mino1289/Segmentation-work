@@ -31,8 +31,32 @@ def unit(v: int):
     while v // 1024 > 1:
         i += 1
         v //= 1024
-    dec = v/1024 
-    return f"{v+dec:.3f}{units[i]}"
+    dec = v / 1024
+    return f"{v + dec:.3f}{units[i]}"
+
+
+def load_state_dict_flexible(model, state_dict):
+    """
+    Load a state_dict into a model, handling potential '_orig_mod.' prefix
+    from torch.compile and removing it if the current model is not compiled.
+    """
+    new_state_dict = {}
+    is_model_compiled = hasattr(model, "_orig_mod") or any(
+        k.startswith("_orig_mod.") for k in model.state_dict().keys()
+    )
+
+    for k, v in state_dict.items():
+        if k.startswith("_orig_mod.") and not is_model_compiled:
+            # Remove prefix
+            name = k[10:]
+        elif not k.startswith("_orig_mod.") and is_model_compiled:
+            # Add prefix
+            name = f"_orig_mod.{k}"
+        else:
+            name = k
+        new_state_dict[name] = v
+
+    return model.load_state_dict(new_state_dict)
 
 
 def compute_pixel_accuracy(preds, targets, ignore_index=255):
