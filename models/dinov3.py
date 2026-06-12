@@ -75,7 +75,7 @@ class DinoV3(nn.Module):
             )
             self.load_from_timm(timm_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, return_all_blocks: bool = False) -> torch.Tensor:
         B, C, H, W = x.shape
 
         # 1. Patch embedding -> donne maintenant [B, H_p * W_p, embed_dim]
@@ -99,9 +99,14 @@ class DinoV3(nn.Module):
 
         # 3. RoPE 2D -> donne sin, cos de forme [hp * wp, head_dim]
         sin, cos = self.rope(hp, wp, device=x.device)
+        
+        # Stocker les activations si demandé
+        intermediate_outputs = []
+        total_blocks = len(self.blocks)
+        target_layers = list(range(total_blocks - 4, total_blocks))
 
         # 4. Blocs de transformer avec RoPE
-        for block in self.blocks:
+        for idx, block in enumerate(self.blocks):
             x = block(
                 x,
                 sin=sin,
@@ -109,8 +114,17 @@ class DinoV3(nn.Module):
                 num_prefix_tokens=self.num_storage_tokens,
             )
 
-        # 5. Normalisation finale
+            if return_all_blocks and idx in target_layers:
+                intermediate_outputs.append(self.layer_norm(x))
+        
         x = self.layer_norm(x)
+        
+        if return_all_blocks:
+            return (
+                intermediate_outputs  # On retourne directement les 4 derniers blocs !
+            )
+
+        # 5. Normalisation finale
         x = x[:, self.num_storage_tokens :, :]
 
         x = x.reshape(b, h, w, c)
