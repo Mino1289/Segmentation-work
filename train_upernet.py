@@ -298,7 +298,6 @@ if __name__ == "__main__":
                     h["train_acc"] = float(h["train_acc"])
                     h["val_acc"] = float(h["val_acc"]) if h["val_acc"] else None
                     h["val_mIoU"] = float(h["val_mIoU"]) if h["val_mIoU"] else None
-                    h["val_biou"] = float(h["val_biou"]) if h["val_biou"] else None
 
     for epoch in range(start_epoch, NUMS_EPOCHS):
         # Training loop
