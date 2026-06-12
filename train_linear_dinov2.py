@@ -161,7 +161,7 @@ if __name__ == "__main__":
     LR = 1e-3
     WEIGHT_DECAY = 1e-4
 
-    NUMS_EPOCHS = 30
+    NUMS_EPOCHS = 60
 
     weight_dir = "weights"
     os.makedirs(weight_dir, exist_ok=True)
@@ -305,8 +305,8 @@ if __name__ == "__main__":
             "val_mIoU": None,
         }
 
-        # Run validation every 5 epochs
-        if (epoch + 1) % 5 == 0:
+        # Run validation every 5 epochs, and after 50% of the epochs to track final convergence
+        if (epoch + 1) % 5 == 0 or epoch >= NUMS_EPOCHS * 0.5:
             model.eval()
 
             metric = SegmentationMetric(num_classes=150)
