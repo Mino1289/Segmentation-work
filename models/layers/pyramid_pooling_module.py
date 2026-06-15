@@ -2,6 +2,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from ..util import AdaptiveAvgPool2dSafe
+
 
 class PyramidPoolingModule(nn.Module):
     def __init__(self, in_channels: int, channels: int, out_channels: int):
@@ -11,25 +13,25 @@ class PyramidPoolingModule(nn.Module):
         self.out_channels = out_channels
 
         self.pool_proj1 = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
+            AdaptiveAvgPool2dSafe(1),
             nn.Conv2d(self.in_channels, self.channels, kernel_size=1),
             nn.BatchNorm2d(self.channels),
             nn.ReLU(inplace=True),
         )
         self.pool_proj2 = nn.Sequential(
-            nn.AdaptiveAvgPool2d(2),
+            AdaptiveAvgPool2dSafe(2),
             nn.Conv2d(self.in_channels, self.channels, kernel_size=1),
             nn.BatchNorm2d(self.channels),
             nn.ReLU(inplace=True),
         )
         self.pool_proj3 = nn.Sequential(
-            nn.AdaptiveAvgPool2d(3),
+            AdaptiveAvgPool2dSafe(3),
             nn.Conv2d(self.in_channels, self.channels, kernel_size=1),
             nn.BatchNorm2d(self.channels),
             nn.ReLU(inplace=True),
         )
         self.pool_proj6 = nn.Sequential(
-            nn.AdaptiveAvgPool2d(6),
+            AdaptiveAvgPool2dSafe(6),
             nn.Conv2d(self.in_channels, self.channels, kernel_size=1),
             nn.BatchNorm2d(self.channels),
             nn.ReLU(inplace=True),

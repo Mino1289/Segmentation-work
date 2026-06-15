@@ -20,6 +20,17 @@ def get_device() -> torch.device:
         return torch.device("cpu")
 
 
+class AdaptiveAvgPool2dSafe(nn.Module):
+    def __init__(self, output_size):
+        super().__init__()
+        self.output_size = output_size
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.device.type == "mps":
+            return F.adaptive_avg_pool2d(x.cpu(), self.output_size).to(x.device)
+        return F.adaptive_avg_pool2d(x, self.output_size)
+
+
 def get_inference_amp_dtype(device: Union[torch.device, str]) -> Optional[torch.dtype]:
     device_type = device.type if isinstance(device, torch.device) else device
     if device_type == "cuda":

@@ -43,6 +43,29 @@ def get_display_image(image: Union[Image.Image, np.ndarray], model_name: str) ->
     return arr
 
 
+def get_display_mask(mask: np.ndarray, model_name: str) -> np.ndarray:
+    """Apply the same resize+center-crop as model inference, preserving labels."""
+    from eval.model_registry import MODEL_CONFIGS
+
+    cfg = MODEL_CONFIGS[model_name]
+    if mask.ndim != 2:
+        raise ValueError("Expected a 2D segmentation mask.")
+
+    image = Image.fromarray(mask.astype(np.int32), mode="I")
+    width, height = image.size
+    short_side = min(width, height)
+    scale = cfg.img_size / short_side
+    resized_size = (int(round(width * scale)), int(round(height * scale)))
+
+    image = image.resize(resized_size, Image.Resampling.NEAREST)
+
+    left = max(0, (image.size[0] - cfg.img_size) // 2)
+    top = max(0, (image.size[1] - cfg.img_size) // 2)
+    image = image.crop((left, top, left + cfg.img_size, top + cfg.img_size))
+
+    return np.array(image, dtype=np.int32)
+
+
 def make_overlay(
     image: Union[Image.Image, np.ndarray],
     color_mask: np.ndarray,
@@ -140,6 +163,8 @@ def plot_gt_row(
     valid = gt_mask >= 0
     display_mask = np.zeros_like(gt_mask, dtype=np.int32)
     display_mask[valid] = gt_mask[valid]
+    if model_name is not None:
+        display_mask = get_display_mask(display_mask, model_name)
     plot_segmentation_row(
         axes,
         image,

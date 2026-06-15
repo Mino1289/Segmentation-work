@@ -6,7 +6,7 @@ from .layers.convnextv2_block import ConvNeXtV2Block
 from .layers.downsampling_block import DownsamplingBlock
 from .layers.layer_norm2d import LayerNorm2d
 
-from .util import get_device
+from .util import AdaptiveAvgPool2dSafe, get_device
 
 
 class ConvNeXtV2Config:
@@ -127,7 +127,7 @@ class ConvNeXtV2(nn.Module):
 
         if self.cls_head:
             self.head = nn.Sequential(
-                nn.AdaptiveAvgPool2d((1, 1)),
+                AdaptiveAvgPool2dSafe((1, 1)),
                 nn.Flatten(1),
                 nn.LayerNorm(self.channels[-1], eps=1e-6),
                 nn.Linear(self.channels[-1], self.num_classes),

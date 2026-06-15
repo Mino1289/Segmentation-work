@@ -223,3 +223,4 @@ test.ipynb
 .DS_Store
 *.pth
 test**/*
+dataset/rue.jpg
