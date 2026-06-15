@@ -63,6 +63,12 @@ Résultats exportés en CSV et JSON dans `results/`.
 | params_M | Nombre total de paramètres (millions) |
 | gflops | MACs / 10⁹ à la résolution d'inférence |
 
+Notebooks dans `notebooks/` — images du split **test** ADE20K et images personnelles (`dataset/dog.jpg`, `dataset/rue.jpg`).
+
+| Notebook | Description |
+|----------|-------------|
+| `compare_segmentation.ipynb` | Grille 3×3 par modèle (image \| overlay \| masque) |
+
 ## Usage
 
 Not yet
