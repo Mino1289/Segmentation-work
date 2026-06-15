@@ -1,15 +1,15 @@
 # Segmentation work
 
-PyTorch Implementation of:
-- SAM
-- DINO
-- ConvNeXt
+Implémentation PyTorch de modèles de segmentation sur ADE20K :
 
-Later, we'll try using the weights from huggingface and timm, to see if we can get the same results as the original implementations. 
+- **SAM** (ViT-H) — segmentation interactive par prompts
+- **DINOv2 / DINOv3** (ViT-Base) — linear probe sur ADE20K
+- **ConvNeXtV2 + UPerNet** — segmentation sémantique end-to-end
+
+Dataset : [merve/scene_parse_150](https://huggingface.co/datasets/merve/scene_parse_150) (150 classes, splits train / validation / test).
 
 ## Installation
 
-We recommend using `uv` as it's very fast and easy to use for creating a virtual environment for this project.
 ```bash
 uv venv --python 3.12
 uv pip install -r requirements.txt
@@ -22,11 +22,31 @@ Le fichier `requirements.txt` inclut `gradio` pour la démo SAM.
 ## Structure du projet
 
 ```
-eval/            # Registry modèles, benchmark, visualisation (model_registry.py, data.py)
 models/          # Architectures (SAM, DINOv2/v3, ConvNeXtV2, UPerNet)
 dataset/         # Chargement ADE20K
+eval/            # Benchmark et utilitaires d'évaluation (model_registry.py, viz.py, data.py)
+demo/            # Démo interactive SAM (Gradio)
+notebooks/       # Visualisation comparative des modèles
 weights/         # Checkpoints entraînés
 train_*.py       # Scripts d'entraînement
+```
+
+## Entraînement
+
+Placez les checkpoints dans `weights/` après entraînement.
+
+```bash
+# DINOv2 linear probe (518px, 60 epochs)
+python train_linear_dinov2.py
+# → weights/linear_dinov2_base.pth
+
+# DINOv3 linear probe (512px, 60 epochs)
+python train_linear_dinov3.py
+# → weights/linear_dinov3_base.pth
+
+# ConvNeXtV2 + UPerNet (512px, 128 epochs)
+python train_upernet.py
+# → weights/upernet_convnextv2_base.pth
 ```
 
 ## Données ADE20K (notebooks / démo)
@@ -37,11 +57,6 @@ Chargement du split **test** ADE20K et images personnelles via `eval/data.py` :
 from eval.data import get_ade20k_sample, load_personal_image, list_test_indices
 image, mask = get_ade20k_sample(42, split="test")
 ```
-
-## Visualisation
-
-Utilitaires dans `eval/viz.py` : palette ADE20K, overlay aligné (resize+center crop),
-légende des classes présentes (`eval/ade20k_classes.py`).
 
 ## Benchmark ADE20K
 
@@ -55,6 +70,13 @@ python eval/benchmark_ade20k.py \
   --output results/benchmark_ade20k.csv
 ```
 
+Override d'un checkpoint :
+
+```bash
+python eval/benchmark_ade20k.py \
+  --checkpoint dinov2_linear=weights/mon_checkpoint.pth
+```
+
 Résultats exportés en CSV et JSON dans `results/`.
 
 | Métrique | Description |
@@ -64,6 +86,11 @@ Résultats exportés en CSV et JSON dans `results/`.
 | boundary_iou | IoU sur les frontières d'objets |
 | params_M | Nombre total de paramètres (millions) |
 | gflops | MACs / 10⁹ à la résolution d'inférence |
+
+## Visualisation
+
+Utilitaires dans `eval/viz.py` : palette ADE20K, overlay aligné (resize+center crop),
+légende des classes présentes (`eval/ade20k_classes.py`).
 
 Notebooks dans `notebooks/` — images du split **test** ADE20K et images personnelles (`dataset/dog.jpg`, `dataset/rue.jpg`).
 
@@ -92,6 +119,11 @@ Fonctionnalités :
 - Clics foreground (objet) / background (exclusion)
 - Affichage overlay, masque binaire et 3 candidats multimask avec scores IoU
 
-## Usage
+## Checkpoints
 
-Not yet
+| Fichier | Modèle | Source |
+|---------|--------|--------|
+| `weights/linear_dinov2_base.pth` | DINOv2 linear | `train_linear_dinov2.py` |
+| `weights/linear_dinov3_base.pth` | DINOv3 linear | `train_linear_dinov3.py` |
+| `weights/upernet_convnextv2_base.pth` | ConvNeXtV2 + UPerNet | `train_upernet.py` |
+| `weights/sam_vit_h_4b8939.pth` | SAM ViT-H | [Meta SAM](https://github.com/facebookresearch/segment-anything#model-checkpoints) |
