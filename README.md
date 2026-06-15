@@ -15,7 +15,9 @@ uv venv --python 3.12
 uv pip install -r requirements.txt
 ```
 
-Note: You may need to install `torch` and `torchvision` separately, to get the appropriate gpu backend depending on your system. You can find the appropriate versions for your system at https://pytorch.org/get-started/locally/.
+Note : installez `torch` et `torchvision` séparément si besoin pour votre backend GPU : https://pytorch.org/get-started/locally/
+
+Le fichier `requirements.txt` inclut `gradio` pour la démo SAM.
 
 ## Structure du projet
 
@@ -71,6 +73,24 @@ Notebooks dans `notebooks/` — images du split **test** ADE20K et images person
 | `visualize_ade20k_samples.ipynb` | Ground truth + prédictions sur le test ADE20K |
 
 Lancez depuis la racine du projet ou depuis `notebooks/` (les notebooks ajustent `sys.path` automatiquement).
+
+## Démo SAM (Gradio)
+
+Segmentation interactive par clics (foreground / background).
+
+**Prérequis** : télécharger le checkpoint Meta SAM ViT-H et le placer dans `weights/sam_vit_h_4b8939.pth`.
+
+```bash
+python demo/sam_app.py
+# Lien public optionnel :
+python demo/sam_app.py --share
+```
+
+Fonctionnalités :
+- Chargement d'images du **test ADE20K** (slider d'index)
+- Upload d'images personnelles
+- Clics foreground (objet) / background (exclusion)
+- Affichage overlay, masque binaire et 3 candidats multimask avec scores IoU
 
 ## Usage
 

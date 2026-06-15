@@ -5,9 +5,9 @@ from torch.nn import functional as F
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 
-from layers.image_encoder import ImageEncoder
-from layers.prompt_encoder import PromptEncoder
-from layers.mask_decoder import MaskDecoder
+from models.layers.image_encoder import ImageEncoder
+from models.layers.prompt_encoder import PromptEncoder
+from models.layers.mask_decoder import MaskDecoder
 
 
 class SAMConfig:
