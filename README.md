@@ -68,6 +68,9 @@ Notebooks dans `notebooks/` — images du split **test** ADE20K et images person
 | Notebook | Description |
 |----------|-------------|
 | `compare_segmentation.ipynb` | Grille 3×3 par modèle (image \| overlay \| masque) |
+| `visualize_ade20k_samples.ipynb` | Ground truth + prédictions sur le test ADE20K |
+
+Lancez depuis la racine du projet ou depuis `notebooks/` (les notebooks ajustent `sys.path` automatiquement).
 
 ## Usage
 
