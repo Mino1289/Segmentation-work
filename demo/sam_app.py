@@ -8,6 +8,11 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from starlette import status
+
+# Gradio still reads the deprecated Starlette 422 constant at request time.
+status.HTTP_422_UNPROCESSABLE_ENTITY = status.HTTP_422_UNPROCESSABLE_CONTENT
+
 import gradio as gr
 import numpy as np
 from PIL import Image

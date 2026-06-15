@@ -71,16 +71,16 @@ class SAMPredictor:
 
         with inference_context(self.device):
             outputs = self.model(batched_input, multimask_output=multimask_output)[0]
-        masks = outputs["masks"].cpu().numpy()  # [N, 1, H, W]
-        iou_preds = outputs["iou_predictions"].cpu().numpy()[0]
+        masks = outputs["masks"].cpu().numpy()[0]  # [N, H, W]
+        iou_preds = outputs["iou_predictions"].cpu().numpy()[0]  # [N]
 
         best_idx = int(np.argmax(iou_preds))
-        best_mask = masks[best_idx, 0].astype(bool)
+        best_mask = masks[best_idx].astype(bool)
 
         return {
             "best_mask": best_mask,
             "best_iou": float(iou_preds[best_idx]),
-            "all_masks": [masks[i, 0].astype(bool) for i in range(len(iou_preds))],
+            "all_masks": [masks[i].astype(bool) for i in range(len(iou_preds))],
             "all_ious": [float(v) for v in iou_preds],
         }
 
