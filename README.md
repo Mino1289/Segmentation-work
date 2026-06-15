@@ -36,6 +36,11 @@ from eval.data import get_ade20k_sample, load_personal_image, list_test_indices
 image, mask = get_ade20k_sample(42, split="test")
 ```
 
+## Visualisation
+
+Utilitaires dans `eval/viz.py` : palette ADE20K, overlay aligné (resize+center crop),
+légende des classes présentes (`eval/ade20k_classes.py`).
+
 ## Usage
 
 Not yet
