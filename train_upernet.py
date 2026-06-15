@@ -27,6 +27,7 @@ from models.util import (
     unit,
     load_state_dict_flexible,
     compute_pixel_accuracy,
+    inference_context,
 )
 
 
@@ -365,7 +366,7 @@ if __name__ == "__main__":
 
             metric = SegmentationMetric(num_classes=150)
 
-            with torch.no_grad():
+            with inference_context(device):
                 for images, masks in val_loader:
                     # Move data to GPU if available
                     images = images.to(device)

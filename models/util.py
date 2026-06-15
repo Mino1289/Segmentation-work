@@ -5,6 +5,8 @@ import torchprofile
 import numpy as np
 from sklearn.metrics import precision_recall_curve, auc
 import cv2
+from contextlib import contextmanager
+from typing import Iterator, Optional, Union
 
 
 def get_device() -> torch.device:
@@ -18,12 +20,42 @@ def get_device() -> torch.device:
         return torch.device("cpu")
 
 
+def get_inference_amp_dtype(device: Union[torch.device, str]) -> Optional[torch.dtype]:
+    device_type = device.type if isinstance(device, torch.device) else device
+    if device_type == "cuda":
+        return torch.bfloat16
+    if device_type == "xpu":
+        return torch.float16
+    return None
+
+
+@contextmanager
+def inference_context(device: Union[torch.device, str]) -> Iterator[None]:
+    """Inference with torch.inference_mode and AMP (bf16 on CUDA, fp16 on XPU)."""
+    device_type = device.type if isinstance(device, torch.device) else device
+    amp_dtype = get_inference_amp_dtype(device_type)
+
+    with torch.inference_mode():
+        if amp_dtype is not None:
+            with torch.autocast(device_type=device_type, dtype=amp_dtype):
+                yield
+        else:
+            yield
+
+
 def num_parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
+def num_parameters_total(model: nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters())
+
+
 def compute_flops(model: nn.Module, input_size: tuple) -> int:
-    return torchprofile.profile_macs(model, torch.randn(1, *input_size))
+    """Return MACs (multiply-accumulate operations) for one forward pass."""
+    device = next(model.parameters()).device
+    dummy = torch.randn(1, *input_size, device=device)
+    return torchprofile.profile_macs(model, dummy)
 
 
 def unit(v: int):
