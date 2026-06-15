@@ -41,6 +41,28 @@ image, mask = get_ade20k_sample(42, split="test")
 Utilitaires dans `eval/viz.py` : palette ADE20K, overlay aligné (resize+center crop),
 légende des classes présentes (`eval/ade20k_classes.py`).
 
+## Benchmark ADE20K
+
+Évalue les modèles sémantiques sur le split **validation** (mIoU, pixel accuracy, Boundary IoU, paramètres, GFLOPs).
+
+```bash
+python eval/benchmark_ade20k.py \
+  --models dinov2_linear dinov3_linear upernet \
+  --split validation \
+  --batch-size 8 \
+  --output results/benchmark_ade20k.csv
+```
+
+Résultats exportés en CSV et JSON dans `results/`.
+
+| Métrique | Description |
+|----------|-------------|
+| pixel_acc | Proportion de pixels correctement classés |
+| mIoU | Moyenne IoU sur les 150 classes |
+| boundary_iou | IoU sur les frontières d'objets |
+| params_M | Nombre total de paramètres (millions) |
+| gflops | MACs / 10⁹ à la résolution d'inférence |
+
 ## Usage
 
 Not yet
