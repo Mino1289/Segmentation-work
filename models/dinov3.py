@@ -99,7 +99,7 @@ class DinoV3(nn.Module):
 
         # 3. RoPE 2D -> donne sin, cos de forme [hp * wp, head_dim]
         sin, cos = self.rope(hp, wp, device=x.device)
-        
+
         # Stocker les activations si demandé
         intermediate_outputs = []
         total_blocks = len(self.blocks)
@@ -116,9 +116,9 @@ class DinoV3(nn.Module):
 
             if return_all_blocks and idx in target_layers:
                 intermediate_outputs.append(self.layer_norm(x))
-        
+
         x = self.layer_norm(x)
-        
+
         if return_all_blocks:
             return (
                 intermediate_outputs  # On retourne directement les 4 derniers blocs !

@@ -224,3 +224,4 @@ test.ipynb
 *.pth
 test**/*
 dataset/rue.jpg
+train/

@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 import torch
 from torch import nn
 from torchvision.transforms import v2
+import numpy as np
 
 from models.dino_feature_extractor import (
     DinoLinearADE20K,
@@ -24,7 +25,12 @@ from models.util import get_device, load_state_dict_flexible, inference_context
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
-SEMANTIC_MODEL_NAMES = ("dinov2_linear", "dinov3_linear", "upernet")
+SEMANTIC_MODEL_NAMES = (
+    "dinov2_base_linear",
+    "dinov3_base_linear",
+    "dinov3_large_linear",
+    "upernet",
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -51,21 +57,27 @@ class ModelConfig:
 
 
 MODEL_CONFIGS: Dict[str, ModelConfig] = {
-    "dinov2_linear": ModelConfig(
-        name="dinov2_linear",
+    "dinov2_base_linear": ModelConfig(
+        name="dinov2_base_linear",
         display_name="DINOv2 linear",
         img_size=518,
         default_checkpoint="weights/linear_dinov2_base.pth",
     ),
-    "dinov3_linear": ModelConfig(
-        name="dinov3_linear",
-        display_name="DINOv3 linear",
+    "dinov3_base_linear": ModelConfig(
+        name="dinov3_base_linear",
+        display_name="DINOv3 Base linear",
         img_size=512,
         default_checkpoint="weights/linear_dinov3_base.pth",
     ),
+    "dinov3_large_linear": ModelConfig(
+        name="dinov3_large_linear",
+        display_name="DINOv3 Large linear",
+        img_size=512,
+        default_checkpoint="weights/linear_dinov3_large.pth",
+    ),
     "upernet": ModelConfig(
         name="upernet",
-        display_name="ConvNeXtV2 + UPerNet",
+        display_name="ConvNeXtV2 (Base) + UPerNet",
         img_size=512,
         default_checkpoint="weights/upernet_convnextv2_base.pth",
     ),
@@ -111,7 +123,7 @@ def get_display_transform(model_name: str) -> v2.Compose:
 
 
 def build_model(model_name: str, pretrained_backbone: bool = True) -> nn.Module:
-    if model_name == "dinov2_linear":
+    if model_name == "dinov2_base_linear":
         config = DinoV2Config("B")
         dino = DinoV2(config=config, pretrained=pretrained_backbone)
         for param in dino.parameters():
@@ -119,7 +131,7 @@ def build_model(model_name: str, pretrained_backbone: bool = True) -> nn.Module:
         feature_extractor = DinoV2FeatureExtractor(dino)
         return DinoLinearADE20K(backbone=feature_extractor, num_classes=150)
 
-    if model_name == "dinov3_linear":
+    if model_name == "dinov3_base_linear":
         config = DinoV3Config("B")
         dino = DinoV3(config=config, pretrained=pretrained_backbone)
         for param in dino.parameters():
@@ -127,8 +139,18 @@ def build_model(model_name: str, pretrained_backbone: bool = True) -> nn.Module:
         feature_extractor = DinoV3FeatureExtractor(dino)
         return DinoLinearADE20K(backbone=feature_extractor, num_classes=150)
 
+    if model_name == "dinov3_large_linear":
+        config = DinoV3Config("L")
+        dino = DinoV3(config=config, pretrained=pretrained_backbone)
+        for param in dino.parameters():
+            param.requires_grad = False
+        feature_extractor = DinoV3FeatureExtractor(dino)
+        return DinoLinearADE20K(backbone=feature_extractor, num_classes=150)
+
     if model_name == "upernet":
-        backbone = Backbone(model_size="base", pretrained=pretrained_backbone, drop_path_rate=0.4)
+        backbone = Backbone(
+            model_size="base", pretrained=pretrained_backbone, drop_path_rate=0.4
+        )
         return UPerNet(backbone, channels=512, num_classes=150)
 
     raise ValueError(
@@ -193,7 +215,7 @@ def predict_mask(
     image,
     model_name: str,
     device: Optional[torch.device] = None,
-) -> "np.ndarray":
+) -> np.ndarray:
     """Run inference on a PIL image and return class indices [H, W]."""
     from PIL import Image
 

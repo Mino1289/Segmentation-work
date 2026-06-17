@@ -10,6 +10,7 @@ from matplotlib.patches import Patch
 from PIL import Image
 
 from eval.ade20k_classes import get_class_name, present_class_ids
+from models.util import compute_image_miou
 
 
 def create_ade20k_palette(num_classes: int = 150, seed: int = 42) -> np.ndarray:
@@ -28,7 +29,9 @@ def pil_to_numpy(image: Union[Image.Image, np.ndarray]) -> np.ndarray:
     return image
 
 
-def get_display_image(image: Union[Image.Image, np.ndarray], model_name: str) -> np.ndarray:
+def get_display_image(
+    image: Union[Image.Image, np.ndarray], model_name: str
+) -> np.ndarray:
     """Apply the same resize+center-crop as model inference (without normalization)."""
     from eval.model_registry import get_display_transform
 
@@ -191,14 +194,16 @@ def plot_model_comparison(
     if display_names is None:
         display_names = {name: name for name in model_names}
 
-    n_models = len(model_names)
-    fig, axes = plt.subplots(n_models, 3, figsize=(figsize[0], figsize[1] * n_models))
-    if n_models == 1:
-        axes = np.expand_dims(axes, axis=0)
+    n_cols = len(model_names)
+    fig, axes = plt.subplots(
+        3, n_cols, figsize=(figsize[0] / 3 * n_cols, figsize[1] * 3)
+    )
+    if n_cols == 1:
+        axes = np.expand_dims(axes, axis=1)
 
-    for row, name in enumerate(model_names):
+    for col, name in enumerate(model_names):
         plot_segmentation_row(
-            axes[row],
+            axes[:, col],
             image,
             predictions[name],
             palette,
@@ -230,16 +235,18 @@ def plot_gt_and_predictions(
     if display_names is None:
         display_names = {name: name for name in model_names}
 
-    n_rows = len(model_names) + (1 if gt_mask is not None else 0)
-    fig, axes = plt.subplots(n_rows, 3, figsize=(figsize[0], figsize[1] * n_rows))
-    if n_rows == 1:
-        axes = np.expand_dims(axes, axis=0)
+    n_cols = len(model_names) + (1 if gt_mask is not None else 0)
+    fig, axes = plt.subplots(
+        3, n_cols, figsize=(figsize[0] / 3 * n_cols, figsize[1] * 3)
+    )
+    if n_cols == 1:
+        axes = np.expand_dims(axes, axis=1)
 
-    row = 0
+    col = 0
     align_name = display_model_name or (model_names[0] if model_names else None)
     if gt_mask is not None:
         plot_gt_row(
-            axes[row],
+            axes[:, col],
             image,
             gt_mask,
             palette,
@@ -247,19 +254,24 @@ def plot_gt_and_predictions(
             alpha=alpha,
             model_name=align_name,
         )
-        row += 1
+        col += 1
 
     for name in model_names:
+        model_title = display_names.get(name, name)
+        if gt_mask is not None:
+            miou, _ = compute_image_miou(predictions[name], gt_mask)
+            model_title = f"{model_title} (mIoU: {miou * 100:.2f}%)"
+
         plot_segmentation_row(
-            axes[row],
+            axes[:, col],
             image,
             predictions[name],
             palette,
-            title=display_names.get(name, name),
+            title=model_title,
             alpha=alpha,
             model_name=name,
         )
-        row += 1
+        col += 1
 
     all_preds = dict(predictions)
     if gt_mask is not None:

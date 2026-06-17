@@ -26,7 +26,11 @@ _MASK_COLORS = np.array(
 
 
 class SAMPredictor:
-    def __init__(self, checkpoint_path: str = DEFAULT_CHECKPOINT, device: Optional[torch.device] = None):
+    def __init__(
+        self,
+        checkpoint_path: str = DEFAULT_CHECKPOINT,
+        device: Optional[torch.device] = None,
+    ):
         self.device = device or get_device()
         self.model = SAM()
         checkpoint_path = resolve_checkpoint_path(checkpoint_path)

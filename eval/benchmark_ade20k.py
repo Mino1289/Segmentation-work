@@ -98,7 +98,9 @@ def evaluate_model(model, loader, device, ignore_index: int = -1) -> dict:
         )
 
     pixel_acc, miou = metric.compute()
-    boundary_iou = float(sum(boundary_ious) / len(boundary_ious)) if boundary_ious else 0.0
+    boundary_iou = (
+        float(sum(boundary_ious) / len(boundary_ious)) if boundary_ious else 0.0
+    )
 
     return {
         "pixel_acc": float(pixel_acc),
@@ -211,7 +213,9 @@ def main() -> None:
             pin_memory=device.type in ("cuda", "xpu"),
         )
 
-        print(f"\nBenchmarking {cfg.display_name} on {args.split} ({len(dataset)} images)...")
+        print(
+            f"\nBenchmarking {cfg.display_name} on {args.split} ({len(dataset)} images)..."
+        )
         try:
             result = benchmark_model(
                 model_name,

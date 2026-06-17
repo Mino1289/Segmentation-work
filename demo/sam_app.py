@@ -147,7 +147,9 @@ def build_demo(checkpoint: str, share: bool) -> gr.Blocks:
 
             with gr.Column(scale=2):
                 gr.Markdown("### Cliquez sur l'image pour segmenter")
-                input_image = gr.Image(type="pil", label="Image interactive", interactive=True)
+                input_image = gr.Image(
+                    type="pil", label="Image interactive", interactive=True
+                )
                 with gr.Row():
                     output_overlay = gr.Image(label="Overlay (meilleur masque)")
                     output_mask = gr.Image(label="Masque binaire")
@@ -191,7 +193,9 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_CHECKPOINT,
         help="Path to SAM ViT-H checkpoint",
     )
-    parser.add_argument("--share", action="store_true", help="Create public Gradio link")
+    parser.add_argument(
+        "--share", action="store_true", help="Create public Gradio link"
+    )
     return parser.parse_args()
 
 

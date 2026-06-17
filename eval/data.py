@@ -44,7 +44,9 @@ def get_ade20k_sample(
 ) -> Tuple[Image.Image, Optional[np.ndarray]]:
     dataset = load_ade20k_split(split)
     if index < 0 or index >= len(dataset):
-        raise IndexError(f"Index {index} out of range for split '{split}' ({len(dataset)} samples)")
+        raise IndexError(
+            f"Index {index} out of range for split '{split}' ({len(dataset)} samples)"
+        )
 
     item = dataset[index]
     image = item["image"].convert("RGB")
@@ -57,9 +59,9 @@ def get_ade20k_sample_count(split: str = "test") -> int:
     return len(load_ade20k_split(split))
 
 
-def list_test_indices(seed: int = 42, n: int = 10) -> List[int]:
+def list_test_indices(seed: int = 42, n: int = 10, split: str = "test") -> List[int]:
     rng = np.random.default_rng(seed)
-    count = get_ade20k_sample_count("test")
+    count = get_ade20k_sample_count(split)
     n = min(n, count)
     return sorted(rng.choice(count, size=n, replace=False).tolist())
 

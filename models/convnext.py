@@ -115,7 +115,7 @@ class ConvNeXt(nn.Module):
                 )
 
         if self.cls_head:
-                    self.model.add_module("global_avg_pool", AdaptiveAvgPool2dSafe((1, 1)))
+            self.model.add_module("global_avg_pool", AdaptiveAvgPool2dSafe((1, 1)))
             self.model.add_module("flatten", nn.Flatten(1))
             self.model.add_module(
                 "layer_norm", nn.LayerNorm(self.channels[-1], eps=1e-6)

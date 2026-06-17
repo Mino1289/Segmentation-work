@@ -3,6 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 import torchprofile
 import numpy as np
+from PIL import Image
 from sklearn.metrics import precision_recall_curve, auc
 import cv2
 from contextlib import contextmanager
@@ -159,6 +160,54 @@ class SegmentationMetric:
 
     def reset(self):
         self.hist = np.zeros((self.num_classes, self.num_classes))
+
+
+def compute_image_miou(
+    pred_mask: np.ndarray,
+    gt_mask: np.ndarray,
+    num_classes: int = 150,
+    ignore_index: int = -1,
+):
+    """
+    Calcule le mIoU et les IoU par classe pour une seule image (format NumPy).
+    """
+
+    if pred_mask.shape != gt_mask.shape:
+        # On utilise NEAREST pour ne pas inventer de fausses classes lors du redimensionnement
+        # uint8 est suffisant puisque vous avez 150 classes (max 255)
+        pred_mask = np.array(
+            Image.fromarray(pred_mask.astype(np.uint8)).resize(
+                (gt_mask.shape[1], gt_mask.shape[0]), Image.NEAREST
+            )
+        )
+
+    # Aplatissement des tableaux
+    preds = pred_mask.flatten()
+    targets = gt_mask.flatten()
+
+    # Filtrage des pixels ignorés ou hors limites
+    valid_mask = (targets != ignore_index) & (targets >= 0) & (targets < num_classes)
+    preds = preds[valid_mask]
+    targets = targets[valid_mask]
+
+    # Matrice de confusion 1D reformée en 2D
+    hist = np.bincount(num_classes * targets + preds, minlength=num_classes**2).reshape(
+        num_classes, num_classes
+    )
+
+    # Intersection (diagonale) et Union
+    intersection = np.diag(hist)
+    union = hist.sum(axis=1) + hist.sum(axis=0) - intersection
+
+    # On ne calcule l'IoU que pour les classes présentes dans la Ground Truth OU prédites
+    valid_classes = union > 0
+    iou_per_class = np.zeros(num_classes)
+    iou_per_class[valid_classes] = intersection[valid_classes] / union[valid_classes]
+
+    # Le mIoU est la moyenne des IoU valides
+    mIoU = np.mean(iou_per_class[valid_classes]) if np.any(valid_classes) else 0.0
+
+    return mIoU, iou_per_class
 
 
 def _get_boundary(mask, dilation_pixels=2):
